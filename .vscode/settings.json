@@ -1,0 +1,12 @@
+{
+    "stylua.targetReleaseVersion": "latest",
+    "editor.inlineSuggest.enabled": true,
+    "editor.quickSuggestions": {
+        "other": true,
+        "comments": false,
+        "strings": false
+    },
+    "editor.suggestOnTriggerCharacters": true,
+    "editor.wordBasedSuggestions": "matchingDocuments",
+    "editor.tabCompletion": "on"
+}
