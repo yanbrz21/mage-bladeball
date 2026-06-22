@@ -44,7 +44,15 @@ local RARITY_ATTRIBUTE = "RARITY"
 local OWNED_ATTRIBUTE = "OWNED"
 
 local SELECTED_PAGE_COLOR = Color3.fromRGB(148, 41, 224)
-local UNSELECTED_PAGE_COLOR = Color3.fromRGB(68, 35, 94)
+local UNSELECTED_PAGE_COLOR = Color3.fromRGB(48, 31, 62)
+local SELECTED_PAGE_TEXT_COLOR = Color3.fromRGB(255, 255, 255)
+local UNSELECTED_PAGE_TEXT_COLOR = Color3.fromRGB(190, 184, 204)
+local SELECTED_PAGE_STROKE_COLOR = Color3.fromRGB(245, 214, 255)
+local UNSELECTED_PAGE_STROKE_COLOR = Color3.fromRGB(82, 64, 106)
+local SELECTED_PAGE_BACKGROUND_TRANSPARENCY = 0.08
+local UNSELECTED_PAGE_BACKGROUND_TRANSPARENCY = 0.35
+local SELECTED_PAGE_STROKE_TRANSPARENCY = 0.1
+local UNSELECTED_PAGE_STROKE_TRANSPARENCY = 0.35
 
 local rarityRank = {
 	Common = 1,
@@ -372,16 +380,30 @@ end
 local function isEquipped(category: string, itemId: string): boolean
 	local snapshot = currentInventorySnapshot
 
-	if snapshot == nil then
-		return false
-	end
-
 	if category == CATEGORY_ABILITY then
-		return snapshot.equippedAbility == itemId
+		if snapshot ~= nil and type(snapshot.equippedAbility) == "string" then
+			return snapshot.equippedAbility == itemId
+		end
+
+		local equippedAbility = localPlayer:GetAttribute("EquippedAbility")
+		if type(equippedAbility) == "string" and equippedAbility ~= "" then
+			return equippedAbility == itemId
+		end
+
+		return getDefaultItemId(category) == itemId
 	end
 
 	if category == CATEGORY_WEAPON_SKIN then
-		return snapshot.equippedWeaponSkin == itemId
+		if snapshot ~= nil and type(snapshot.equippedWeaponSkin) == "string" then
+			return snapshot.equippedWeaponSkin == itemId
+		end
+
+		local equippedWeaponSkin = localPlayer:GetAttribute("EquippedWeaponSkin")
+		if type(equippedWeaponSkin) == "string" and equippedWeaponSkin ~= "" then
+			return equippedWeaponSkin == itemId
+		end
+
+		return getDefaultItemId(category) == itemId
 	end
 
 	return false
@@ -394,11 +416,11 @@ end
 
 local function getOwnedItems(category: string): { string }
 	local snapshot = currentInventorySnapshot
-	local ownedSet = {}
-	local ownedItems = {}
+	local ownedSet = {} :: { [string]: boolean }
+	local ownedItems = {} :: { string }
 
 	if snapshot ~= nil then
-		local snapshotOwnedItems = {}
+		local snapshotOwnedItems = {} :: { string }
 
 		if category == CATEGORY_ABILITY then
 			snapshotOwnedItems = snapshot.ownedAbilities or {}
@@ -592,16 +614,49 @@ local function getClickableFromClone(clone: GuiObject): GuiButton?
 	return nil
 end
 
-local function updatePageButtonsVisual()
-	if abilitiesButton ~= nil then
-		abilitiesButton.BackgroundColor3 = if currentPage == PAGE_ABILITIES
-			then SELECTED_PAGE_COLOR
-			else UNSELECTED_PAGE_COLOR
+local function applyPageButtonVisual(button: TextButton?, selected: boolean)
+	if button == nil then
+		return
 	end
 
-	if skinsButton ~= nil then
-		skinsButton.BackgroundColor3 = if currentPage == PAGE_SKINS then SELECTED_PAGE_COLOR else UNSELECTED_PAGE_COLOR
+	button.AutoButtonColor = true
+	button.BackgroundColor3 = if selected then SELECTED_PAGE_COLOR else UNSELECTED_PAGE_COLOR
+	button.BackgroundTransparency = if selected
+		then SELECTED_PAGE_BACKGROUND_TRANSPARENCY
+		else UNSELECTED_PAGE_BACKGROUND_TRANSPARENCY
+
+	local outline = button:FindFirstChild("TabOutline")
+	if outline ~= nil and outline:IsA("UIStroke") then
+		outline.Color = if selected then SELECTED_PAGE_STROKE_COLOR else UNSELECTED_PAGE_STROKE_COLOR
+		outline.Transparency = if selected
+			then SELECTED_PAGE_STROKE_TRANSPARENCY
+			else UNSELECTED_PAGE_STROKE_TRANSPARENCY
+		outline.Thickness = if selected then 2 else 1.25
 	end
+
+	local underline = button:FindFirstChild("ActiveUnderline")
+	if underline ~= nil and underline:IsA("GuiObject") then
+		underline.Visible = selected
+		underline.BackgroundColor3 = SELECTED_PAGE_STROKE_COLOR
+	end
+
+	local title = button:FindFirstChild("Title")
+	if title ~= nil and title:IsA("TextLabel") then
+		title.TextColor3 = if selected then SELECTED_PAGE_TEXT_COLOR else UNSELECTED_PAGE_TEXT_COLOR
+		title.TextTransparency = if selected then 0 else 0.08
+
+		local titleStroke = title:FindFirstChild("Outer")
+		if titleStroke ~= nil and titleStroke:IsA("UIStroke") then
+			titleStroke.Color = Color3.fromRGB(24, 18, 35)
+			titleStroke.Transparency = if selected then 0 else 0.25
+			titleStroke.Thickness = if selected then 0.11 else 0.08
+		end
+	end
+end
+
+local function updatePageButtonsVisual()
+	applyPageButtonVisual(abilitiesButton, currentPage == PAGE_ABILITIES)
+	applyPageButtonVisual(skinsButton, currentPage == PAGE_SKINS)
 end
 
 local function updateEquipButton()
@@ -1077,12 +1132,30 @@ end
 
 function InventoryController:GetEquippedAbility(): string?
 	local snapshot = currentInventorySnapshot
-	return if snapshot ~= nil then snapshot.equippedAbility else nil
+	if snapshot ~= nil and type(snapshot.equippedAbility) == "string" and snapshot.equippedAbility ~= "" then
+		return snapshot.equippedAbility
+	end
+
+	local equippedAbility = localPlayer:GetAttribute("EquippedAbility")
+	if type(equippedAbility) == "string" and equippedAbility ~= "" then
+		return equippedAbility
+	end
+
+	return getDefaultItemId(CATEGORY_ABILITY)
 end
 
 function InventoryController:GetEquippedWeaponSkin(): string?
 	local snapshot = currentInventorySnapshot
-	return if snapshot ~= nil then snapshot.equippedWeaponSkin else nil
+	if snapshot ~= nil and type(snapshot.equippedWeaponSkin) == "string" and snapshot.equippedWeaponSkin ~= "" then
+		return snapshot.equippedWeaponSkin
+	end
+
+	local equippedWeaponSkin = localPlayer:GetAttribute("EquippedWeaponSkin")
+	if type(equippedWeaponSkin) == "string" and equippedWeaponSkin ~= "" then
+		return equippedWeaponSkin
+	end
+
+	return getDefaultItemId(CATEGORY_WEAPON_SKIN)
 end
 
 function InventoryController:GetAbilityLevel(abilityId: string): number
