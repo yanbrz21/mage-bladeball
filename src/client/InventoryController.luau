@@ -12,8 +12,8 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
 
-local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
+local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
 
 local requestEquipItemRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestEquipItem)
@@ -96,6 +96,7 @@ local isWatchingInventoryPart = false
 local wasInsideInventoryPart = false
 
 local connections: { RBXScriptConnection } = {}
+local inventoryChangedEvent = Instance.new("BindableEvent")
 
 local getItemRarity: (category: string, itemId: string) -> string
 
@@ -1050,6 +1051,7 @@ function InventoryController:BuildScreen()
 
 			self:RenderInventory()
 			updateEquipButton()
+			inventoryChangedEvent:Fire(currentInventorySnapshot, payload)
 		end)
 	)
 
@@ -1067,6 +1069,34 @@ function InventoryController:Init(context)
 	self._connections = connections
 
 	print("[InventoryController] Init")
+end
+
+function InventoryController:GetSnapshot(): InventorySnapshot?
+	return currentInventorySnapshot
+end
+
+function InventoryController:GetEquippedAbility(): string?
+	local snapshot = currentInventorySnapshot
+	return if snapshot ~= nil then snapshot.equippedAbility else nil
+end
+
+function InventoryController:GetEquippedWeaponSkin(): string?
+	local snapshot = currentInventorySnapshot
+	return if snapshot ~= nil then snapshot.equippedWeaponSkin else nil
+end
+
+function InventoryController:GetAbilityLevel(abilityId: string): number
+	local snapshot = currentInventorySnapshot
+	if snapshot == nil then
+		return 1
+	end
+
+	local level = snapshot.abilityLevels[abilityId]
+	return if type(level) == "number" and level >= 1 then math.floor(level) else 1
+end
+
+function InventoryController:OnInventoryChanged(callback: (InventorySnapshot?, any?) -> ()): RBXScriptConnection
+	return inventoryChangedEvent.Event:Connect(callback)
 end
 
 function InventoryController:Open()
