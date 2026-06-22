@@ -10,6 +10,7 @@ local parabellumFolder = ReplicatedStorage:WaitForChild("Parabellum")
 local CONTROLLER_NAMES = table.freeze({
 	"DrawController",
 	"InventoryController",
+	"QuestController"
 })
 
 type Controller = {
