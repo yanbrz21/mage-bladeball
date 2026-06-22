@@ -17,25 +17,13 @@ local Remotes = require(Network:WaitForChild("Remotes"))
 
 local HUD_SCREENGUI: ScreenGui?
 
-local requestSkinDrawRemote = Remotes.GetClientToServer(
-	Network,
-	Remotes.ClientToServer.RequestSkinDraw
-)
+local requestSkinDrawRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestSkinDraw)
 
-local skinDrawResultRemote = Remotes.GetServerToClient(
-	Network,
-	Remotes.ServerToClient.SkinDrawResult
-)
+local skinDrawResultRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.SkinDrawResult)
 
-local economyBalanceChangedRemote = Remotes.GetServerToClient(
-	Network,
-	Remotes.ServerToClient.EconomyBalanceChanged
-)
+local economyBalanceChangedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.EconomyBalanceChanged)
 
-local inventoryUpdatedRemote = Remotes.GetServerToClient(
-	Network,
-	Remotes.ServerToClient.InventoryUpdated
-)
+local inventoryUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.InventoryUpdated)
 
 local DrawController = {
 	Name = "DrawController",
@@ -1154,7 +1142,8 @@ local function connectDrawClose()
 	table.insert(
 		connections,
 		drawClose.InputBegan:Connect(function(input: InputObject)
-			if input.UserInputType == Enum.UserInputType.MouseButton1
+			if
+				input.UserInputType == Enum.UserInputType.MouseButton1
 				or input.UserInputType == Enum.UserInputType.Touch
 			then
 				closeDrawUi()
@@ -1330,38 +1319,50 @@ function DrawController:BuildUI()
 
 	connectSpinTypeButtons()
 
-	table.insert(connections, localPlayer:GetAttributeChangedSignal("Coins"):Connect(function()
-		updateCurrencyLabels()
-		updateDrawPrices()
-	end))
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("Coins"):Connect(function()
+			updateCurrencyLabels()
+			updateDrawPrices()
+		end)
+	)
 
 	table.insert(connections, localPlayer:GetAttributeChangedSignal("SkinTokens"):Connect(updateCurrencyLabels))
 
-	table.insert(connections, economyBalanceChangedRemote.OnClientEvent:Connect(function(payload)
-		if type(payload) ~= "table" then
-			return
-		end
+	table.insert(
+		connections,
+		economyBalanceChangedRemote.OnClientEvent:Connect(function(payload)
+			if type(payload) ~= "table" then
+				return
+			end
 
-		local balance = payload.balance
-		if typeof(balance) == "number" then
-			currentBalance = balance
-		end
+			local balance = payload.balance
+			if typeof(balance) == "number" then
+				currentBalance = balance
+			end
 
-		updateCurrencyLabels()
-		updateDrawPrices()
-	end))
+			updateCurrencyLabels()
+			updateDrawPrices()
+		end)
+	)
 
-	table.insert(connections, inventoryUpdatedRemote.OnClientEvent:Connect(function()
-		updateSpinItems()
-	end))
+	table.insert(
+		connections,
+		inventoryUpdatedRemote.OnClientEvent:Connect(function()
+			updateSpinItems()
+		end)
+	)
 
-	table.insert(connections, skinDrawResultRemote.OnClientEvent:Connect(function(payload)
-		if type(payload) ~= "table" then
-			return
-		end
+	table.insert(
+		connections,
+		skinDrawResultRemote.OnClientEvent:Connect(function(payload)
+			if type(payload) ~= "table" then
+				return
+			end
 
-		handleSkinDrawResult(payload :: SkinDrawResultPayload)
-	end))
+			handleSkinDrawResult(payload :: SkinDrawResultPayload)
+		end)
+	)
 end
 
 function DrawController:Open()
@@ -1380,6 +1381,11 @@ function DrawController:Open()
 	updateSpinItems()
 	updateOddsFrame()
 	updateSpinTypeButtonsVisual()
+end
+
+function DrawController:OpenDraw(drawId: string)
+	setCurrentDraw(drawId)
+	self:Open()
 end
 
 function DrawController:Close()

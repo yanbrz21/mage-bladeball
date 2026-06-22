@@ -11,14 +11,18 @@ local playerGui = localPlayer:WaitForChild("PlayerGui")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
+local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
 
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
+local DrawController = require(Parabellum:WaitForChild("DrawController"))
 
 local requestEquipItemRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestEquipItem)
+local requestUpgradeAbilityRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestUpgradeAbility)
 
 local inventoryUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.InventoryUpdated)
+local abilityUpgradeResultRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.AbilityUpgradeResult)
 
 local InventoryController = {
 	Name = "InventoryController",
@@ -29,6 +33,9 @@ local CATEGORY_WEAPON_SKIN = "WeaponSkin"
 
 local PAGE_ABILITIES = "Abilities"
 local PAGE_SKINS = "Skins"
+
+local ABILITY_DRAW_ID = "NormalAbilityDraw"
+local SKIN_DRAW_ID = "NormalSkinDraw"
 
 local INVENTORY_PART_TAG = "INVENTORY_PART"
 local INVENTORY_PART_MARGIN = 2.5
@@ -43,6 +50,12 @@ local ITEM_ID_ATTRIBUTE = "ITEM_ID"
 local RARITY_ATTRIBUTE = "RARITY"
 local OWNED_ATTRIBUTE = "OWNED"
 
+local ABILITY_PROGRESS_NAME = "AbilityUpgradeProgress"
+local ABILITY_PROGRESS_FILL_NAME = "Fill"
+local ABILITY_PROGRESS_TEXT_NAME = "Count"
+local ABILITY_LEVEL_BADGE_NAME = "AbilityLevelBadge"
+local ABILITY_LEVEL_TEXT_NAME = "Level"
+
 local SELECTED_PAGE_COLOR = Color3.fromRGB(148, 41, 224)
 local UNSELECTED_PAGE_COLOR = Color3.fromRGB(48, 31, 62)
 local SELECTED_PAGE_TEXT_COLOR = Color3.fromRGB(255, 255, 255)
@@ -53,6 +66,19 @@ local SELECTED_PAGE_BACKGROUND_TRANSPARENCY = 0.08
 local UNSELECTED_PAGE_BACKGROUND_TRANSPARENCY = 0.35
 local SELECTED_PAGE_STROKE_TRANSPARENCY = 0.1
 local UNSELECTED_PAGE_STROKE_TRANSPARENCY = 0.35
+local PROGRESS_FILL_COLOR = Color3.fromRGB(97, 235, 164)
+local PROGRESS_READY_FILL_COLOR = Color3.fromRGB(248, 210, 86)
+local ACTION_BUTTON_DISABLED_TEXT_COLOR = Color3.fromRGB(150, 150, 150)
+local ACTION_BUTTON_DISABLED_IMAGE_COLOR = Color3.fromRGB(105, 105, 105)
+local ACTION_BUTTON_SIZE = UDim2.new(0.925853252, 0, 0.105, 0)
+local HIDDEN_ACTION_BUTTON_SIZE = UDim2.new(0.925853252, 0, 0, 0)
+
+local ORIGINAL_TEXT_COLOR_ATTRIBUTE = "OriginalActionTextColor"
+local ORIGINAL_TEXT_TRANSPARENCY_ATTRIBUTE = "OriginalActionTextTransparency"
+local ORIGINAL_GRADIENT_ENABLED_ATTRIBUTE = "OriginalActionGradientEnabled"
+local ORIGINAL_IMAGE_COLOR_ATTRIBUTE = "OriginalActionImageColor"
+local ORIGINAL_IMAGE_TRANSPARENCY_ATTRIBUTE = "OriginalActionImageTransparency"
+local ORIGINAL_STROKE_TRANSPARENCY_ATTRIBUTE = "OriginalActionStrokeTransparency"
 
 local rarityRank = {
 	Common = 1,
@@ -81,6 +107,7 @@ local itemName: TextLabel?
 local itemImage: ImageLabel?
 local itemDescription: TextLabel?
 local itemEquipButton: TextButton?
+local abilityUpgradeButton: TextButton?
 local closeButton: GuiButton?
 local inventoryButton: GuiButton?
 
@@ -251,13 +278,158 @@ local function setEquipButtonText(text: string)
 	count.Text = text
 end
 
-local function setEquipButtonEnabled(enabled: boolean)
-	if itemEquipButton == nil then
+local function rememberAttribute(instance: Instance, attributeName: string, value: any)
+	if instance:GetAttribute(attributeName) == nil then
+		instance:SetAttribute(attributeName, value)
+	end
+end
+
+local function getColorAttribute(instance: Instance, attributeName: string, fallback: Color3): Color3
+	local value = instance:GetAttribute(attributeName)
+	return if typeof(value) == "Color3" then value else fallback
+end
+
+local function getNumberAttribute(instance: Instance, attributeName: string, fallback: number): number
+	local value = instance:GetAttribute(attributeName)
+	return if typeof(value) == "number" then value else fallback
+end
+
+local function getBooleanAttribute(instance: Instance, attributeName: string, fallback: boolean): boolean
+	local value = instance:GetAttribute(attributeName)
+	return if typeof(value) == "boolean" then value else fallback
+end
+
+local function setActionButtonVisual(button: TextButton?, enabled: boolean)
+	if button == nil then
 		return
 	end
 
-	itemEquipButton.Active = enabled
-	itemEquipButton.AutoButtonColor = enabled
+	button.Active = enabled
+	button.AutoButtonColor = enabled
+	button.Selectable = enabled
+	button.Interactable = enabled
+
+	for _, descendant in ipairs(button:GetDescendants()) do
+		if descendant:IsA("TextLabel") then
+			rememberAttribute(descendant, ORIGINAL_TEXT_COLOR_ATTRIBUTE, descendant.TextColor3)
+			rememberAttribute(descendant, ORIGINAL_TEXT_TRANSPARENCY_ATTRIBUTE, descendant.TextTransparency)
+
+			local originalColor = getColorAttribute(descendant, ORIGINAL_TEXT_COLOR_ATTRIBUTE, descendant.TextColor3)
+			local originalTransparency =
+				getNumberAttribute(descendant, ORIGINAL_TEXT_TRANSPARENCY_ATTRIBUTE, descendant.TextTransparency)
+
+			descendant.TextColor3 = if enabled then originalColor else ACTION_BUTTON_DISABLED_TEXT_COLOR
+			descendant.TextTransparency = if enabled
+				then originalTransparency
+				else math.clamp(originalTransparency + 0.15, 0, 1)
+
+			for _, child in ipairs(descendant:GetChildren()) do
+				if child:IsA("UIGradient") then
+					rememberAttribute(child, ORIGINAL_GRADIENT_ENABLED_ATTRIBUTE, child.Enabled)
+					child.Enabled = if enabled
+						then getBooleanAttribute(child, ORIGINAL_GRADIENT_ENABLED_ATTRIBUTE, child.Enabled)
+						else false
+				end
+			end
+		elseif descendant:IsA("ImageLabel") then
+			rememberAttribute(descendant, ORIGINAL_IMAGE_COLOR_ATTRIBUTE, descendant.ImageColor3)
+			rememberAttribute(descendant, ORIGINAL_IMAGE_TRANSPARENCY_ATTRIBUTE, descendant.ImageTransparency)
+
+			local originalColor = getColorAttribute(descendant, ORIGINAL_IMAGE_COLOR_ATTRIBUTE, descendant.ImageColor3)
+			local originalTransparency =
+				getNumberAttribute(descendant, ORIGINAL_IMAGE_TRANSPARENCY_ATTRIBUTE, descendant.ImageTransparency)
+
+			descendant.ImageColor3 = if enabled then originalColor else ACTION_BUTTON_DISABLED_IMAGE_COLOR
+			descendant.ImageTransparency = if enabled
+				then originalTransparency
+				else math.clamp(originalTransparency + 0.35, 0, 1)
+		elseif descendant:IsA("UIStroke") then
+			rememberAttribute(descendant, ORIGINAL_STROKE_TRANSPARENCY_ATTRIBUTE, descendant.Transparency)
+
+			local originalTransparency =
+				getNumberAttribute(descendant, ORIGINAL_STROKE_TRANSPARENCY_ATTRIBUTE, descendant.Transparency)
+			descendant.Transparency = if enabled
+				then originalTransparency
+				else math.clamp(originalTransparency + 0.45, 0, 1)
+		end
+	end
+end
+
+local function setEquipButtonEnabled(enabled: boolean)
+	setActionButtonVisual(itemEquipButton, enabled)
+end
+
+local function setButtonText(button: TextButton?, text: string)
+	if button == nil then
+		return
+	end
+
+	local coin = button:FindFirstChild("Coin")
+	if coin == nil then
+		warn(`[InventoryController] missing Coin inside {button:GetFullName()}`)
+		return
+	end
+
+	local count = coin:FindFirstChild("Count", true)
+	if count == nil or not count:IsA("TextLabel") then
+		warn(`[InventoryController] missing Coin.Count TextLabel inside {button:GetFullName()}`)
+		return
+	end
+
+	count.Text = text
+end
+
+local function setUpgradeButtonText(text: string)
+	setButtonText(abilityUpgradeButton, text)
+end
+
+local function setUpgradeButtonEnabled(enabled: boolean)
+	setActionButtonVisual(abilityUpgradeButton, enabled)
+end
+
+local function getAbilityLevelValue(abilityId: string): number
+	local snapshot = currentInventorySnapshot
+	if snapshot == nil then
+		return 1
+	end
+
+	local level = snapshot.abilityLevels[abilityId]
+	return if type(level) == "number" and level >= 1 then math.floor(level) else 1
+end
+
+local function getAbilityFragments(abilityId: string): number
+	local snapshot = currentInventorySnapshot
+	if snapshot == nil then
+		return 0
+	end
+
+	local fragments = snapshot.abilityFragments[abilityId]
+	return if type(fragments) == "number" and fragments > 0 then math.floor(fragments) else 0
+end
+
+local function getAbilityMaxLevel(): number
+	local upgradeConfig = (EconomyConfig :: any).AbilityUpgrade
+	if type(upgradeConfig) ~= "table" or type(upgradeConfig.MaxLevel) ~= "number" then
+		return 1
+	end
+
+	return math.max(1, math.floor(upgradeConfig.MaxLevel))
+end
+
+local function getAbilityUpgradeCost(abilityId: string): number?
+	local currentLevel = getAbilityLevelValue(abilityId)
+	local maxLevel = getAbilityMaxLevel()
+	if currentLevel >= maxLevel then
+		return nil
+	end
+
+	local upgradeConfig = (EconomyConfig :: any).AbilityUpgrade
+	if type(upgradeConfig) ~= "table" or type(upgradeConfig.FragmentCostsByNextLevel) ~= "table" then
+		return nil
+	end
+
+	local cost = upgradeConfig.FragmentCostsByNextLevel[currentLevel + 1]
+	return if type(cost) == "number" and cost > 0 then math.floor(cost) else nil
 end
 
 local function getInventoryItemConfig(category: string, itemId: string): any?
@@ -407,11 +579,6 @@ local function isEquipped(category: string, itemId: string): boolean
 	end
 
 	return false
-end
-
-local function isDefaultItem(category: string, itemId: string): boolean
-	local defaultItemId = getDefaultItemId(category)
-	return defaultItemId == itemId
 end
 
 local function getOwnedItems(category: string): { string }
@@ -674,24 +841,122 @@ local function updateEquipButton()
 	local itemId = selectedItemId
 
 	if not selectedItemOwned then
-		setEquipButtonText("unlocked in the gacha")
-		setEquipButtonEnabled(false)
+		setEquipButtonText("DRAW")
+		setEquipButtonEnabled(true)
 		return
 	end
 
-	if isEquipped(category, itemId) and isDefaultItem(category, itemId) then
-		setEquipButtonText("cant unequip default")
+	if isEquipped(category, itemId) then
+		setEquipButtonText("EQUIPPED")
 		setEquipButtonEnabled(false)
 		return
 	end
 
 	setEquipButtonEnabled(true)
+	setEquipButtonText("EQUIP")
+end
 
-	if isEquipped(category, itemId) then
-		setEquipButtonText("UNEQUIP")
-	else
-		setEquipButtonText("EQUIP")
+local function updateUpgradeButton()
+	if abilityUpgradeButton == nil then
+		return
 	end
+
+	local shouldShow = selectedCategory == CATEGORY_ABILITY and selectedItemId ~= nil and selectedItemOwned
+	abilityUpgradeButton.Visible = shouldShow
+	abilityUpgradeButton.Size = if shouldShow then ACTION_BUTTON_SIZE else HIDDEN_ACTION_BUTTON_SIZE
+
+	if not shouldShow or selectedItemId == nil then
+		setUpgradeButtonEnabled(false)
+		setUpgradeButtonText("UPGRADE")
+		return
+	end
+
+	local abilityId = selectedItemId
+	local level = getAbilityLevelValue(abilityId)
+	local maxLevel = getAbilityMaxLevel()
+	local fragments = getAbilityFragments(abilityId)
+	local cost = getAbilityUpgradeCost(abilityId)
+
+	if cost == nil or level >= maxLevel then
+		setUpgradeButtonText(`MAX LV {maxLevel}`)
+		setUpgradeButtonEnabled(false)
+		return
+	end
+
+	setUpgradeButtonText(`UPGRADE {fragments}/{cost}`)
+	setUpgradeButtonEnabled(fragments >= cost)
+end
+
+local function updateSelectedActionButtons()
+	updateEquipButton()
+	updateUpgradeButton()
+end
+
+local function setCloneAbilityProgress(clone: GuiObject, category: string, itemId: string, owned: boolean)
+	local progress = clone:FindFirstChild(ABILITY_PROGRESS_NAME)
+	if progress == nil or not progress:IsA("Frame") then
+		warn(`[InventoryController] missing {ABILITY_PROGRESS_NAME} frame in {clone:GetFullName()}`)
+		return
+	end
+
+	progress.Visible = category == CATEGORY_ABILITY and owned
+
+	if not progress.Visible then
+		return
+	end
+
+	local fragments = getAbilityFragments(itemId)
+	local cost = getAbilityUpgradeCost(itemId)
+	local maxLevel = getAbilityMaxLevel()
+	local level = getAbilityLevelValue(itemId)
+	local fillRatio = 1
+	local text = `LV {level} MAX`
+
+	if cost ~= nil and level < maxLevel then
+		fillRatio = math.clamp(fragments / cost, 0, 1)
+		text = `{fragments}/{cost}`
+	end
+
+	local fill = progress:FindFirstChild(ABILITY_PROGRESS_FILL_NAME)
+	if fill == nil or not fill:IsA("Frame") then
+		warn(`[InventoryController] missing {ABILITY_PROGRESS_FILL_NAME} frame in {progress:GetFullName()}`)
+		return
+	end
+
+	fill.Size = UDim2.new(fillRatio, 0, 1, 0)
+	fill.BackgroundColor3 = if cost ~= nil and fragments >= cost then PROGRESS_READY_FILL_COLOR else PROGRESS_FILL_COLOR
+
+	local label = progress:FindFirstChild(ABILITY_PROGRESS_TEXT_NAME)
+	if label == nil or not label:IsA("TextLabel") then
+		warn(`[InventoryController] missing {ABILITY_PROGRESS_TEXT_NAME} text in {progress:GetFullName()}`)
+		return
+	end
+
+	label.Text = text
+end
+
+local function setCloneAbilityLevelBadge(clone: GuiObject, category: string, itemId: string, owned: boolean)
+	local badge = clone:FindFirstChild(ABILITY_LEVEL_BADGE_NAME)
+	if badge == nil or not badge:IsA("Frame") then
+		warn(`[InventoryController] missing {ABILITY_LEVEL_BADGE_NAME} frame in {clone:GetFullName()}`)
+		return
+	end
+
+	badge.Visible = category == CATEGORY_ABILITY and owned
+
+	if not badge.Visible then
+		return
+	end
+
+	local level = getAbilityLevelValue(itemId)
+
+	local label = badge:FindFirstChild(ABILITY_LEVEL_TEXT_NAME)
+	if label == nil or not label:IsA("TextLabel") then
+		warn(`[InventoryController] missing {ABILITY_LEVEL_TEXT_NAME} text in {badge:GetFullName()}`)
+		return
+	end
+
+	label.Text = `Lv.{level}`
 end
 
 local function selectItem(category: string, itemId: string, owned: boolean)
@@ -707,7 +972,20 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 	end
 
 	if itemDescription ~= nil then
-		itemDescription.Text = `Rarity: {rarity}`
+		if category == CATEGORY_ABILITY and owned then
+			local level = getAbilityLevelValue(itemId)
+			local maxLevel = getAbilityMaxLevel()
+			local fragments = getAbilityFragments(itemId)
+			local cost = getAbilityUpgradeCost(itemId)
+
+			if cost == nil or level >= maxLevel then
+				itemDescription.Text = `Rarity: {rarity}\nLevel: {level}/{maxLevel}\nFragments: MAX`
+			else
+				itemDescription.Text = `Rarity: {rarity}\nLevel: {level}/{maxLevel}\nFragments: {fragments}/{cost}`
+			end
+		else
+			itemDescription.Text = `Rarity: {rarity}`
+		end
 	end
 
 	if itemImage ~= nil then
@@ -718,7 +996,7 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 		inventoryItemInfo.Visible = true
 	end
 
-	updateEquipButton()
+	updateSelectedActionButtons()
 end
 
 local function clearSelectedItem()
@@ -742,7 +1020,30 @@ local function clearSelectedItem()
 		itemImage.Image = ""
 	end
 
-	updateEquipButton()
+	updateSelectedActionButtons()
+end
+
+local function getDrawIdForCategory(category: string): string?
+	if category == CATEGORY_ABILITY then
+		return ABILITY_DRAW_ID
+	end
+
+	if category == CATEGORY_WEAPON_SKIN then
+		return SKIN_DRAW_ID
+	end
+
+	return nil
+end
+
+local function openDrawForCategory(category: string)
+	local drawId = getDrawIdForCategory(category)
+	if drawId == nil then
+		return
+	end
+
+	setScreenVisible(false)
+	DrawController:Start()
+	DrawController:OpenDraw(drawId)
 end
 
 local function equipSelectedItem()
@@ -751,8 +1052,7 @@ local function equipSelectedItem()
 	end
 
 	if not selectedItemOwned then
-		setEquipButtonText("unlocked in the gacha")
-		setEquipButtonEnabled(false)
+		openDrawForCategory(selectedCategory)
 		return
 	end
 
@@ -760,29 +1060,39 @@ local function equipSelectedItem()
 	local itemId = selectedItemId
 
 	if isEquipped(category, itemId) then
-		local defaultItemId = getDefaultItemId(category)
-
-		if defaultItemId == nil then
-			return
-		end
-
-		if defaultItemId == itemId then
-			setEquipButtonText("cant unequip default")
-			setEquipButtonEnabled(false)
-			return
-		end
-
-		requestEquipItemRemote:FireServer({
-			category = category,
-			itemId = defaultItemId,
-		})
-
+		updateEquipButton()
 		return
 	end
 
 	requestEquipItemRemote:FireServer({
 		category = category,
 		itemId = itemId,
+	})
+end
+
+local function upgradeSelectedAbility()
+	if selectedCategory ~= CATEGORY_ABILITY or selectedItemId == nil or not selectedItemOwned then
+		updateUpgradeButton()
+		return
+	end
+
+	local abilityId = selectedItemId
+	local cost = getAbilityUpgradeCost(abilityId)
+	if cost == nil then
+		updateUpgradeButton()
+		return
+	end
+
+	if getAbilityFragments(abilityId) < cost then
+		updateUpgradeButton()
+		return
+	end
+
+	setUpgradeButtonEnabled(false)
+	setUpgradeButtonText("UPGRADING...")
+
+	requestUpgradeAbilityRemote:FireServer({
+		abilityId = abilityId,
 	})
 end
 
@@ -809,6 +1119,8 @@ local function createInventoryItem(row: Frame, category: string, itemId: string,
 
 	local equipped = owned and isEquipped(category, itemId)
 	setCloneEquippedVisible(clone, equipped)
+	setCloneAbilityLevelBadge(clone, category, itemId, owned)
+	setCloneAbilityProgress(clone, category, itemId, owned)
 
 	local clickable = getClickableFromClone(clone)
 
@@ -902,7 +1214,7 @@ function InventoryController:RenderInventory()
 
 	renderItemsInRows(unownedItems, category, false, unownedRowTemplate, "Unowned", 101)
 
-	updateEquipButton()
+	updateSelectedActionButtons()
 end
 
 local function setCurrentPage(page: string)
@@ -973,6 +1285,7 @@ function InventoryController:GetReferences()
 	itemName = getReferenceByTag("INVENTORY_ITEM_NAME") :: TextLabel?
 	itemImage = getOptionalReferenceByTag("INVENTORY_ITEM_IMAGE") :: ImageLabel?
 	itemEquipButton = getReferenceByTag("INVENTORY_EQUIP_BUTTON") :: TextButton?
+	abilityUpgradeButton = getOptionalReferenceByTag("INVENTORY_UPGRADE_BUTTON") :: TextButton?
 
 	HUD_SCREENGUI = getReferenceByTag("SIDEMENU") :: ScreenGui?
 
@@ -1061,6 +1374,15 @@ function InventoryController:BuildScreen()
 		)
 	end
 
+	if abilityUpgradeButton ~= nil then
+		table.insert(
+			connections,
+			abilityUpgradeButton.Activated:Connect(function()
+				upgradeSelectedAbility()
+			end)
+		)
+	end
+
 	if abilitiesButton ~= nil then
 		print("[InventoryController] abilities button connected")
 
@@ -1105,12 +1427,45 @@ function InventoryController:BuildScreen()
 			currentInventorySnapshot = snapshot :: InventorySnapshot
 
 			self:RenderInventory()
-			updateEquipButton()
+			updateSelectedActionButtons()
 			inventoryChangedEvent:Fire(currentInventorySnapshot, payload)
 		end)
 	)
 
-	updateEquipButton()
+	table.insert(
+		connections,
+		abilityUpgradeResultRemote.OnClientEvent:Connect(function(payload)
+			if type(payload) ~= "table" then
+				return
+			end
+
+			local abilityId = payload.abilityId
+			if type(abilityId) ~= "string" or abilityId == "" then
+				updateUpgradeButton()
+				return
+			end
+
+			local snapshot = currentInventorySnapshot
+			if payload.success == true and snapshot ~= nil then
+				local levelAfter = payload.levelAfter
+				local fragmentsAfter = payload.fragmentsAfter
+
+				if type(levelAfter) == "number" then
+					snapshot.abilityLevels[abilityId] = math.floor(levelAfter)
+				end
+
+				if type(fragmentsAfter) == "number" then
+					snapshot.abilityFragments[abilityId] = math.max(0, math.floor(fragmentsAfter))
+				end
+
+				self:RenderInventory()
+			end
+
+			updateSelectedActionButtons()
+		end)
+	)
+
+	updateSelectedActionButtons()
 end
 
 function InventoryController:Init(context)
@@ -1159,13 +1514,7 @@ function InventoryController:GetEquippedWeaponSkin(): string?
 end
 
 function InventoryController:GetAbilityLevel(abilityId: string): number
-	local snapshot = currentInventorySnapshot
-	if snapshot == nil then
-		return 1
-	end
-
-	local level = snapshot.abilityLevels[abilityId]
-	return if type(level) == "number" and level >= 1 then math.floor(level) else 1
+	return getAbilityLevelValue(abilityId)
 end
 
 function InventoryController:OnInventoryChanged(callback: (InventorySnapshot?, any?) -> ()): RBXScriptConnection
@@ -1181,7 +1530,7 @@ function InventoryController:Open()
 	end
 
 	self:RenderInventory()
-	updateEquipButton()
+	updateSelectedActionButtons()
 end
 
 function InventoryController:Close()
