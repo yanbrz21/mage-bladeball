@@ -1,7 +1,7 @@
 --!strict
 
-local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -12,9 +12,10 @@ local Network = Shared:WaitForChild("Network")
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
-local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
-local Remotes = require(Network:WaitForChild("Remotes"))
 local EventBus = require(Packages.CommonKit.EventBus)
+local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
+local MatchConfig = require(Config:WaitForChild("MatchConfig"))
+local Remotes = require(Network:WaitForChild("Remotes"))
 
 local HUD_SCREENGUI: ScreenGui?
 
@@ -219,13 +220,21 @@ local function setGuiVisible(instance: Instance?, visible: boolean)
 		instance.Enabled = visible
 	elseif instance:IsA("GuiObject") then
 		instance.Visible = visible
-	elseif instance:IsA("Frame") then
-		instance.Visible = visible
 	end
 end
 
 local function setHudVisible(visible: boolean)
 	setGuiVisible(HUD_SCREENGUI, visible)
+end
+
+local function isLocalPlayerAliveInRound(): boolean
+	return localPlayer:GetAttribute("PlayerState") == MatchConfig.PlayerStates.AliveInRound
+end
+
+local function updateDrawEntryVisibility()
+	if drawButton ~= nil then
+		drawButton.Visible = not isLocalPlayerAliveInRound()
+	end
 end
 
 local function getGachaBasePart(instance: Instance): BasePart?
@@ -1266,7 +1275,7 @@ local function startGachaPartWatcher()
 
 			local isInside = isInsideAnyGachaPart()
 
-			if isInside and not wasInsideGachaPart then
+			if isInside and not wasInsideGachaPart and not isLocalPlayerAliveInRound() then
 				DrawController:Open()
 			end
 
@@ -1349,6 +1358,7 @@ function DrawController:BuildUI()
 	setScreenEnabled(false)
 	setHudVisible(true)
 	startGachaPartWatcher()
+	updateDrawEntryVisibility()
 
 	setGuiVisible(chooseDrawFrame, true)
 	setGuiVisible(rngFrame, false)
@@ -1424,6 +1434,17 @@ function DrawController:BuildUI()
 
 	table.insert(
 		connections,
+		localPlayer:GetAttributeChangedSignal("PlayerState"):Connect(function()
+			updateDrawEntryVisibility()
+
+			if isLocalPlayerAliveInRound() then
+				closeDrawUi()
+			end
+		end)
+	)
+
+	table.insert(
+		connections,
 		economyBalanceChangedRemote.OnClientEvent:Connect(function(payload)
 			if type(payload) ~= "table" then
 				return
@@ -1459,6 +1480,12 @@ function DrawController:BuildUI()
 end
 
 function DrawController:Open()
+	if isLocalPlayerAliveInRound() then
+		closeDrawUi()
+		updateDrawEntryVisibility()
+		return
+	end
+
 	setScreenEnabled(true)
 	setHudVisible(false)
 

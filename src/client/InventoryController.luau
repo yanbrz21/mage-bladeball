@@ -13,10 +13,11 @@ local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
 local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
 
+local DrawController = require(Parabellum:WaitForChild("DrawController"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
+local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
-local DrawController = require(Parabellum:WaitForChild("DrawController"))
 
 local requestEquipItemRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestEquipItem)
 local requestUpgradeAbilityRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestUpgradeAbility)
@@ -194,13 +195,21 @@ local function setGuiVisible(instance: Instance?, visible: boolean)
 		instance.Enabled = visible
 	elseif instance:IsA("GuiObject") then
 		instance.Visible = visible
-	elseif instance:IsA("Frame") then
-		instance.Visible = visible
 	end
 end
 
 local function setHudVisible(visible: boolean)
 	setGuiVisible(HUD_SCREENGUI, visible)
+end
+
+local function isLocalPlayerAliveInRound(): boolean
+	return localPlayer:GetAttribute("PlayerState") == MatchConfig.PlayerStates.AliveInRound
+end
+
+local function updateInventoryEntryVisibility()
+	if inventoryButton ~= nil then
+		inventoryButton.Visible = not isLocalPlayerAliveInRound()
+	end
 end
 
 local function closeInventoryUi()
@@ -1258,7 +1267,7 @@ local function startInventoryPartWatcher()
 
 			local isInside = isInsideAnyInventoryPart()
 
-			if isInside and not wasInsideInventoryPart then
+			if isInside and not wasInsideInventoryPart and not isLocalPlayerAliveInRound() then
 				InventoryController:Open()
 			end
 
@@ -1345,6 +1354,7 @@ function InventoryController:BuildScreen()
 	setScreenVisible(false)
 	setHudVisible(true)
 	startInventoryPartWatcher()
+	updateInventoryEntryVisibility()
 
 	if inventoryItemInfo ~= nil then
 		inventoryItemInfo.Visible = false
@@ -1418,6 +1428,17 @@ function InventoryController:BuildScreen()
 	else
 		warn("[InventoryController] skins button not found")
 	end
+
+	table.insert(
+		connections,
+		localPlayer:GetAttributeChangedSignal("PlayerState"):Connect(function()
+			updateInventoryEntryVisibility()
+
+			if isLocalPlayerAliveInRound() then
+				closeInventoryUi()
+			end
+		end)
+	)
 
 	table.insert(
 		connections,
@@ -1530,6 +1551,12 @@ function InventoryController:OnInventoryChanged(callback: (InventorySnapshot?, a
 end
 
 function InventoryController:Open()
+	if isLocalPlayerAliveInRound() then
+		closeInventoryUi()
+		updateInventoryEntryVisibility()
+		return
+	end
+
 	setScreenVisible(true)
 	setHudVisible(false)
 
