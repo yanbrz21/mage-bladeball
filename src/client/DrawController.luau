@@ -5,15 +5,16 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
+local Packages = ReplicatedStorage:WaitForChild("Packages")
 
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
+local EventBus = require(Packages.CommonKit.EventBus)
 
 local HUD_SCREENGUI: ScreenGui?
 
@@ -45,6 +46,11 @@ local ROLL_LEAD_CARD_COUNT = 48
 local ROLL_TRAIL_CARD_COUNT = 7
 local ROLL_DURATION_SECONDS = 3.25
 local ROLL_RESULT_WAIT_SECONDS = 1.15
+local ROLL_TICK_MIN_DISTANCE_PIXELS = 24
+local ROLL_TICK_MIN_INTERVAL_SECONDS = 0.035
+local LOCAL_DRAW_ROLL_TICK_EVENT = "Client.LocalDrawRollTick"
+local LOCAL_DRAW_ROLL_STOPPED_EVENT = "Client.LocalDrawRollStopped"
+local LOCAL_DRAW_RESULT_REVEALED_EVENT = "Client.LocalDrawResultRevealed"
 
 local SELECTED_STROKE_COLOR = Color3.fromRGB(193, 134, 251)
 local UNSELECTED_STROKE_COLOR = Color3.fromRGB(38, 38, 38)
@@ -487,8 +493,6 @@ end
 local function updateCurrencyLabels()
 	readBalanceAttribute()
 
-	local skinTokens = localPlayer:GetAttribute("SkinTokens") or 0
-
 	if coinsText ~= nil then
 		coinsText.Text = tostring(currentBalance)
 	end
@@ -734,6 +738,32 @@ local function getRollVisualItemFromReward(reward: SkinDrawRewardPayload): RollV
 	}
 end
 
+local function fireDrawRollTick()
+	EventBus.Fire(LOCAL_DRAW_ROLL_TICK_EVENT)
+end
+
+local function fireDrawRollStopped()
+	EventBus.Fire(LOCAL_DRAW_ROLL_STOPPED_EVENT)
+end
+
+local function hasRareDrawReward(result: SkinDrawResultPayload?): boolean
+	if result == nil then
+		return false
+	end
+
+	for _, reward in result.rewards do
+		if reward.rarity ~= "Common" then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function fireDrawResultRevealed(result: SkinDrawResultPayload?)
+	EventBus.Fire(LOCAL_DRAW_RESULT_REVEALED_EVENT, hasRareDrawReward(result))
+end
+
 local function getSortedRollEntries(drawConfig): { any }
 	local entries = {}
 
@@ -809,6 +839,56 @@ local function getTargetCanvasPosition(targetClone: GuiObject): Vector2
 	return Vector2.new(wantedX, rollScrollingFrame.CanvasPosition.Y)
 end
 
+local function getRollTickDistancePixels(targetClone: GuiObject): number
+	local spacing = 0
+	if rollScrollingFrame ~= nil then
+		local layout = rollScrollingFrame:FindFirstChildWhichIsA("UIListLayout")
+		if layout ~= nil then
+			spacing = layout.Padding.Offset
+		end
+	end
+
+	return math.max(ROLL_TICK_MIN_DISTANCE_PIXELS, targetClone.AbsoluteSize.X + spacing)
+end
+
+local function connectRollTickPlayback(
+	token: number,
+	tween: Tween,
+	startCanvasX: number,
+	tickDistancePixels: number
+): RBXScriptConnection
+	local lastCanvasX = startCanvasX
+	local distanceSinceTick = tickDistancePixels
+	local lastTickAt = 0
+
+	return RunService.RenderStepped:Connect(function()
+		if token ~= rollToken or rollScrollingFrame == nil or rollTween ~= tween then
+			return
+		end
+
+		local currentCanvasX = rollScrollingFrame.CanvasPosition.X
+		local delta = math.abs(currentCanvasX - lastCanvasX)
+		lastCanvasX = currentCanvasX
+
+		if delta <= 0 then
+			return
+		end
+
+		distanceSinceTick += delta
+
+		local now = os.clock()
+		while distanceSinceTick >= tickDistancePixels do
+			if now - lastTickAt < ROLL_TICK_MIN_INTERVAL_SECONDS then
+				break
+			end
+
+			distanceSinceTick -= tickDistancePixels
+			lastTickAt = now
+			fireDrawRollTick()
+		end
+	end)
+end
+
 local function stopRollTween()
 	if rollTween ~= nil then
 		rollTween:Cancel()
@@ -824,6 +904,7 @@ local function finishRollUi()
 
 	stopRollTween()
 	setSkipButtonTitle("CLAIM")
+	fireDrawResultRevealed(latestDrawResult)
 end
 
 local function claimRollUi()
@@ -868,6 +949,7 @@ local function skipRoll()
 		setRollExplanation(lastReward.displayName)
 	end
 
+	fireDrawRollStopped()
 	finishRollUi()
 end
 
@@ -928,6 +1010,12 @@ local function playSingleRoll(
 	local completedConnection = tween.Completed:Connect(function()
 		completed = true
 	end)
+	local tickConnection = connectRollTickPlayback(
+		token,
+		tween,
+		rollScrollingFrame.CanvasPosition.X,
+		getRollTickDistancePixels(targetClone)
+	)
 
 	tween:Play()
 
@@ -935,6 +1023,7 @@ local function playSingleRoll(
 		task.wait(0.03)
 	end
 
+	tickConnection:Disconnect()
 	completedConnection:Disconnect()
 
 	if rollTween == tween then
@@ -947,6 +1036,7 @@ local function playSingleRoll(
 
 	rollScrollingFrame.CanvasPosition = targetCanvasPosition
 	setRollExplanation(reward.displayName)
+	fireDrawRollStopped()
 
 	task.wait(ROLL_RESULT_WAIT_SECONDS)
 
