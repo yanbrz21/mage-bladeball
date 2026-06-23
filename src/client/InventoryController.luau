@@ -79,6 +79,8 @@ local ORIGINAL_GRADIENT_ENABLED_ATTRIBUTE = "OriginalActionGradientEnabled"
 local ORIGINAL_IMAGE_COLOR_ATTRIBUTE = "OriginalActionImageColor"
 local ORIGINAL_IMAGE_TRANSPARENCY_ATTRIBUTE = "OriginalActionImageTransparency"
 local ORIGINAL_STROKE_TRANSPARENCY_ATTRIBUTE = "OriginalActionStrokeTransparency"
+local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
+local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
 
 local rarityRank = {
 	Common = 1,
@@ -1291,6 +1293,12 @@ function InventoryController:GetReferences()
 
 	abilitiesButton = getReferenceByTag("INVENTORY_ABILITIES_BUTTON") :: TextButton?
 	skinsButton = getReferenceByTag("INVENTORY_SKINS_BUTTON") :: TextButton?
+	if abilitiesButton ~= nil then
+		abilitiesButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
+	end
+	if skinsButton ~= nil then
+		skinsButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
+	end
 
 	if inventoryScrollFrame ~= nil then
 		local owned = inventoryScrollFrame:FindFirstChild("Owned")

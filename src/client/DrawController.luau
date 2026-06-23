@@ -31,6 +31,8 @@ local DrawController = {
 
 local DRAW_ID_ATTRIBUTE = "ID"
 local SELECTED_ATTRIBUTE = "SELECTED"
+local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
+local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
 
 local GACHA_PART_TAG = "GACHA_PART"
 local GACHA_PART_MARGIN = 2.5
@@ -1098,6 +1100,7 @@ local function connectSpinTypeButtons()
 
 		local button = instance :: TextButton
 		local drawId = button:GetAttribute(DRAW_ID_ATTRIBUTE)
+		button:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
 
 		if type(drawId) ~= "string" then
 			warn(`[DrawController] missing/invalid {DRAW_ID_ATTRIBUTE} attribute on {button:GetFullName()}`)
