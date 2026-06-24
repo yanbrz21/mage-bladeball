@@ -44,6 +44,7 @@ local INVENTORY_PART_MARGIN = 2.5
 local INVENTORY_PART_CHECK_INTERVAL = 0.1
 
 local ITEMS_PER_ROW = 3
+local INVENTORY_CANVAS_BOTTOM_PADDING = 24
 
 local CLONE_ATTRIBUTE = "IS_CLONE"
 local ROW_CLONE_ATTRIBUTE = "IS_ROW_CLONE"
@@ -138,6 +139,7 @@ local currentPage = PAGE_ABILITIES
 local lastInventoryPartCheck = 0
 local isWatchingInventoryPart = false
 local wasInsideInventoryPart = false
+local inventoryCanvasUpdateToken = 0
 
 local connections: { RBXScriptConnection } = {}
 local inventoryChangedEvent = Instance.new("BindableEvent")
@@ -839,35 +841,66 @@ local function clearGeneratedRows()
 	clearRowItemClones(unownedRowTemplate)
 end
 
+local function getEffectiveUIScale(instance: Instance): number
+	local scale = 1
+	local current: Instance? = instance
+
+	while current ~= nil do
+		for _, child in current:GetChildren() do
+			if child:IsA("UIScale") then
+				scale *= child.Scale
+			end
+		end
+
+		current = current.Parent
+	end
+
+	return math.max(scale, 0.001)
+end
+
 local function updateInventoryCanvasSize()
 	if inventoryScrollFrame == nil then
 		return
 	end
 
-	local contentHeight = 0
-	local layout = inventoryScrollFrame:FindFirstChildWhichIsA("UIListLayout")
+	inventoryScrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
 
-	if layout ~= nil then
-		contentHeight = layout.AbsoluteContentSize.Y
+	local listLayout = inventoryScrollFrame:FindFirstChildOfClass("UIListLayout")
+	if listLayout ~= nil then
+		local canvasHeight = math.ceil(listLayout.AbsoluteContentSize.Y / getEffectiveUIScale(inventoryScrollFrame))
+			+ INVENTORY_CANVAS_BOTTOM_PADDING
+		inventoryScrollFrame.CanvasSize = UDim2.fromOffset(0, canvasHeight)
 	else
-		local scrollTop = inventoryScrollFrame.AbsolutePosition.Y
-
-		for _, child in inventoryScrollFrame:GetChildren() do
-			if child:IsA("GuiObject") and child.Visible then
-				local childBottom = child.AbsolutePosition.Y - scrollTop + child.AbsoluteSize.Y
-				contentHeight = math.max(contentHeight, childBottom)
-			end
-		end
+		inventoryScrollFrame.CanvasSize = UDim2.fromOffset(0, 0)
 	end
 
-	contentHeight = math.max(0, math.ceil(contentHeight))
-	inventoryScrollFrame.CanvasSize = UDim2.fromOffset(0, contentHeight)
-
-	local maxCanvasY = math.max(0, contentHeight - inventoryScrollFrame.AbsoluteSize.Y)
+	local maxCanvasY =
+		math.max(0, inventoryScrollFrame.AbsoluteCanvasSize.Y - inventoryScrollFrame.AbsoluteWindowSize.Y)
 	local currentCanvasPosition = inventoryScrollFrame.CanvasPosition
 	if currentCanvasPosition.Y > maxCanvasY then
 		inventoryScrollFrame.CanvasPosition = Vector2.new(currentCanvasPosition.X, maxCanvasY)
 	end
+end
+
+local function scheduleInventoryCanvasSizeUpdate()
+	inventoryCanvasUpdateToken += 1
+	local token = inventoryCanvasUpdateToken
+
+	task.defer(function()
+		updateInventoryCanvasSize()
+
+		RunService.Heartbeat:Wait()
+		if token ~= inventoryCanvasUpdateToken then
+			return
+		end
+		updateInventoryCanvasSize()
+
+		RunService.Heartbeat:Wait()
+		if token ~= inventoryCanvasUpdateToken then
+			return
+		end
+		updateInventoryCanvasSize()
+	end)
 end
 
 local function setCloneEquippedVisible(clone: Instance, equipped: boolean)
@@ -1352,7 +1385,7 @@ function InventoryController:RenderInventory()
 	renderItemsInRows(unownedItems, category, false, unownedRowTemplate, "Unowned", 101)
 
 	updateSelectedActionButtons()
-	task.defer(updateInventoryCanvasSize)
+	scheduleInventoryCanvasSizeUpdate()
 end
 
 local function setCurrentPage(page: string)
