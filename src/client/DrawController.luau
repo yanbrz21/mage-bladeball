@@ -4,6 +4,7 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -52,6 +53,7 @@ local ROLL_TICK_MIN_INTERVAL_SECONDS = 0.035
 local LOCAL_DRAW_ROLL_TICK_EVENT = "Client.LocalDrawRollTick"
 local LOCAL_DRAW_ROLL_STOPPED_EVENT = "Client.LocalDrawRollStopped"
 local LOCAL_DRAW_RESULT_REVEALED_EVENT = "Client.LocalDrawResultRevealed"
+local DRAW_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumDrawEntryConnected"
 
 local SELECTED_STROKE_COLOR = Color3.fromRGB(193, 134, 251)
 local UNSELECTED_STROKE_COLOR = Color3.fromRGB(38, 38, 38)
@@ -223,18 +225,100 @@ local function setGuiVisible(instance: Instance?, visible: boolean)
 	end
 end
 
+local function preventGuiResetOnSpawn(instance: Instance?)
+	local current = instance
+	while current ~= nil do
+		if current:IsA("ScreenGui") then
+			current.ResetOnSpawn = false
+			return
+		end
+
+		current = current.Parent
+	end
+end
+
+local function preventTaggedGuiResetOnSpawn(tag: string)
+	for _, instance in CollectionService:GetTagged(tag) do
+		if instance:IsDescendantOf(playerGui) or instance:IsDescendantOf(StarterGui) then
+			preventGuiResetOnSpawn(instance)
+		end
+	end
+end
+
+local function preventDrawGuiResetOnSpawn()
+	preventTaggedGuiResetOnSpawn("DRAW_BUTTON")
+	preventTaggedGuiResetOnSpawn("SIDEMENU")
+	preventTaggedGuiResetOnSpawn("SPIN_SCREEN")
+end
+
 local function setHudVisible(visible: boolean)
 	setGuiVisible(HUD_SCREENGUI, visible)
 end
 
-local function isLocalPlayerAliveInRound(): boolean
-	return localPlayer:GetAttribute("PlayerState") == MatchConfig.PlayerStates.AliveInRound
+local function isLocalPlayerLockedForRound(): boolean
+	local playerState = localPlayer:GetAttribute("PlayerState")
+	return playerState == MatchConfig.PlayerStates.AliveInRound or playerState == MatchConfig.PlayerStates.DeadInRound
 end
 
 local function updateDrawEntryVisibility()
-	if drawButton ~= nil then
-		drawButton.Visible = not isLocalPlayerAliveInRound()
+	local shouldShow = not isLocalPlayerLockedForRound()
+	for _, instance in CollectionService:GetTagged("DRAW_BUTTON") do
+		if instance:IsDescendantOf(playerGui) and instance:IsA("GuiObject") then
+			instance.Visible = shouldShow
+		end
 	end
+end
+
+local function connectDrawEntryButton(instance: Instance)
+	if not instance:IsDescendantOf(playerGui) or not instance:IsA("GuiButton") then
+		return
+	end
+
+	preventGuiResetOnSpawn(instance)
+	drawButton = instance
+	instance.Visible = not isLocalPlayerLockedForRound()
+
+	if instance:GetAttribute(DRAW_ENTRY_CONNECTED_ATTRIBUTE) == true then
+		return
+	end
+
+	instance:SetAttribute(DRAW_ENTRY_CONNECTED_ATTRIBUTE, true)
+	table.insert(
+		connections,
+		instance.Activated:Connect(function()
+			print("[DrawController] draw button clicked")
+			DrawController:Open()
+		end)
+	)
+end
+
+local function syncDrawEntryButtons()
+	preventDrawGuiResetOnSpawn()
+	for _, instance in CollectionService:GetTagged("DRAW_BUTTON") do
+		connectDrawEntryButton(instance)
+	end
+	updateDrawEntryVisibility()
+end
+
+local function handleDrawScreenAdded(instance: Instance)
+	if not instance:IsDescendantOf(playerGui) then
+		return
+	end
+
+	screen = instance
+	preventGuiResetOnSpawn(instance)
+	setScreenEnabled(false)
+end
+
+local function handleSideMenuAdded(instance: Instance)
+	if not instance:IsDescendantOf(playerGui) then
+		return
+	end
+
+	HUD_SCREENGUI = instance :: any
+	preventGuiResetOnSpawn(instance)
+	setHudVisible(true)
+	syncDrawEntryButtons()
 end
 
 local function getGachaBasePart(instance: Instance): BasePart?
@@ -1275,7 +1359,7 @@ local function startGachaPartWatcher()
 
 			local isInside = isInsideAnyGachaPart()
 
-			if isInside and not wasInsideGachaPart and not isLocalPlayerAliveInRound() then
+			if isInside and not wasInsideGachaPart and not isLocalPlayerLockedForRound() then
 				DrawController:Open()
 			end
 
@@ -1289,11 +1373,14 @@ local function startGachaPartWatcher()
 			wasInsideGachaPart = false
 			setScreenEnabled(false)
 			setHudVisible(true)
+			task.defer(syncDrawEntryButtons)
 		end)
 	)
 end
 
 function DrawController:GetReferences()
+	preventDrawGuiResetOnSpawn()
+
 	coinsText = getReferenceByTag("SPIN_COINS") :: TextLabel?
 
 	spin1xButton = getReferenceByTag("SPIN_1X_BUTTON") :: TextButton?
@@ -1358,7 +1445,7 @@ function DrawController:BuildUI()
 	setScreenEnabled(false)
 	setHudVisible(true)
 	startGachaPartWatcher()
-	updateDrawEntryVisibility()
+	syncDrawEntryButtons()
 
 	setGuiVisible(chooseDrawFrame, true)
 	setGuiVisible(rngFrame, false)
@@ -1369,19 +1456,13 @@ function DrawController:BuildUI()
 	updateSpinItems()
 	updateOddsFrame()
 
-	if drawButton ~= nil then
-		print("[DrawController] draw button connected")
-
-		table.insert(
-			connections,
-			drawButton.Activated:Connect(function()
-				print("[DrawController] draw button clicked")
-				DrawController:Open()
-			end)
-		)
-	else
+	if drawButton == nil then
 		warn("[DrawController] draw button not found")
 	end
+
+	table.insert(connections, CollectionService:GetInstanceAddedSignal("DRAW_BUTTON"):Connect(connectDrawEntryButton))
+	table.insert(connections, CollectionService:GetInstanceAddedSignal("SPIN_SCREEN"):Connect(handleDrawScreenAdded))
+	table.insert(connections, CollectionService:GetInstanceAddedSignal("SIDEMENU"):Connect(handleSideMenuAdded))
 
 	connectDrawClose()
 
@@ -1437,7 +1518,7 @@ function DrawController:BuildUI()
 		localPlayer:GetAttributeChangedSignal("PlayerState"):Connect(function()
 			updateDrawEntryVisibility()
 
-			if isLocalPlayerAliveInRound() then
+			if isLocalPlayerLockedForRound() then
 				closeDrawUi()
 			end
 		end)
@@ -1480,7 +1561,7 @@ function DrawController:BuildUI()
 end
 
 function DrawController:Open()
-	if isLocalPlayerAliveInRound() then
+	if isLocalPlayerLockedForRound() then
 		closeDrawUi()
 		updateDrawEntryVisibility()
 		return

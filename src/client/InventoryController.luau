@@ -4,6 +4,7 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -82,6 +83,11 @@ local ORIGINAL_IMAGE_TRANSPARENCY_ATTRIBUTE = "OriginalActionImageTransparency"
 local ORIGINAL_STROKE_TRANSPARENCY_ATTRIBUTE = "OriginalActionStrokeTransparency"
 local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
 local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
+local INVENTORY_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumInventoryEntryConnected"
+local INVENTORY_CLOSE_CONNECTED_ATTRIBUTE = "ParabellumInventoryCloseConnected"
+local INVENTORY_EQUIP_CONNECTED_ATTRIBUTE = "ParabellumInventoryEquipConnected"
+local INVENTORY_UPGRADE_CONNECTED_ATTRIBUTE = "ParabellumInventoryUpgradeConnected"
+local INVENTORY_PAGE_CONNECTED_ATTRIBUTE = "ParabellumInventoryPageConnected"
 
 local rarityRank = {
 	Common = 1,
@@ -137,6 +143,7 @@ local connections: { RBXScriptConnection } = {}
 local inventoryChangedEvent = Instance.new("BindableEvent")
 
 local getItemRarity: (category: string, itemId: string) -> string
+local refreshScreenReferences: () -> ()
 
 local function getReferenceByTag(tag: string, timeout: number?): Instance?
 	local startedAt = os.clock()
@@ -198,18 +205,106 @@ local function setGuiVisible(instance: Instance?, visible: boolean)
 	end
 end
 
+local function preventGuiResetOnSpawn(instance: Instance?)
+	local current = instance
+	while current ~= nil do
+		if current:IsA("ScreenGui") then
+			current.ResetOnSpawn = false
+			return
+		end
+
+		current = current.Parent
+	end
+end
+
+local function preventTaggedGuiResetOnSpawn(tag: string)
+	for _, instance in CollectionService:GetTagged(tag) do
+		if instance:IsDescendantOf(playerGui) or instance:IsDescendantOf(StarterGui) then
+			preventGuiResetOnSpawn(instance)
+		end
+	end
+end
+
+local function preventInventoryGuiResetOnSpawn()
+	preventTaggedGuiResetOnSpawn("INVENTORY_BUTTON")
+	preventTaggedGuiResetOnSpawn("SIDEMENU")
+	preventTaggedGuiResetOnSpawn("INVENTORY_SCREEN")
+end
+
 local function setHudVisible(visible: boolean)
 	setGuiVisible(HUD_SCREENGUI, visible)
 end
 
-local function isLocalPlayerAliveInRound(): boolean
-	return localPlayer:GetAttribute("PlayerState") == MatchConfig.PlayerStates.AliveInRound
+local function isLocalPlayerLockedForRound(): boolean
+	local playerState = localPlayer:GetAttribute("PlayerState")
+	return playerState == MatchConfig.PlayerStates.AliveInRound or playerState == MatchConfig.PlayerStates.DeadInRound
 end
 
 local function updateInventoryEntryVisibility()
-	if inventoryButton ~= nil then
-		inventoryButton.Visible = not isLocalPlayerAliveInRound()
+	local shouldShow = not isLocalPlayerLockedForRound()
+	for _, instance in CollectionService:GetTagged("INVENTORY_BUTTON") do
+		if instance:IsDescendantOf(playerGui) and instance:IsA("GuiObject") then
+			instance.Visible = shouldShow
+		end
 	end
+end
+
+local function connectInventoryEntryButton(instance: Instance)
+	if not instance:IsDescendantOf(playerGui) or not instance:IsA("GuiButton") then
+		return
+	end
+
+	preventGuiResetOnSpawn(instance)
+	inventoryButton = instance
+	instance.Visible = not isLocalPlayerLockedForRound()
+
+	if instance:GetAttribute(INVENTORY_ENTRY_CONNECTED_ATTRIBUTE) == true then
+		return
+	end
+
+	instance:SetAttribute(INVENTORY_ENTRY_CONNECTED_ATTRIBUTE, true)
+	table.insert(
+		connections,
+		instance.Activated:Connect(function()
+			print("[InventoryController] inventory button clicked")
+			InventoryController:Open()
+		end)
+	)
+end
+
+local function syncInventoryEntryButtons()
+	preventInventoryGuiResetOnSpawn()
+	for _, instance in CollectionService:GetTagged("INVENTORY_BUTTON") do
+		connectInventoryEntryButton(instance)
+	end
+	updateInventoryEntryVisibility()
+end
+
+local function handleInventoryScreenAdded(instance: Instance)
+	if not instance:IsDescendantOf(playerGui) then
+		return
+	end
+
+	screen = instance
+	preventGuiResetOnSpawn(instance)
+	if isLocalPlayerLockedForRound() then
+		setScreenVisible(false)
+	end
+
+	task.defer(function()
+		refreshScreenReferences()
+	end)
+end
+
+local function handleSideMenuAdded(instance: Instance)
+	if not instance:IsDescendantOf(playerGui) then
+		return
+	end
+
+	HUD_SCREENGUI = instance :: any
+	preventGuiResetOnSpawn(instance)
+	setHudVisible(true)
+	syncInventoryEntryButtons()
 end
 
 local function closeInventoryUi()
@@ -1267,7 +1362,7 @@ local function startInventoryPartWatcher()
 
 			local isInside = isInsideAnyInventoryPart()
 
-			if isInside and not wasInsideInventoryPart and not isLocalPlayerAliveInRound() then
+			if isInside and not wasInsideInventoryPart and not isLocalPlayerLockedForRound() then
 				InventoryController:Open()
 			end
 
@@ -1280,11 +1375,32 @@ local function startInventoryPartWatcher()
 		localPlayer.CharacterAdded:Connect(function()
 			wasInsideInventoryPart = false
 			closeInventoryUi()
+			task.defer(syncInventoryEntryButtons)
 		end)
 	)
 end
 
 function InventoryController:GetReferences()
+	preventInventoryGuiResetOnSpawn()
+
+	inventoryScrollFrame = nil
+	screen = nil
+	inventoryItemInfo = nil
+	itemName = nil
+	itemImage = nil
+	itemDescription = nil
+	itemEquipButton = nil
+	abilityUpgradeButton = nil
+	closeButton = nil
+	inventoryButton = nil
+	abilitiesButton = nil
+	skinsButton = nil
+	HUD_SCREENGUI = nil
+	ownedRowTemplate = nil
+	unownedRowTemplate = nil
+	unownedTitle = nil
+	templateFolder = nil
+
 	inventoryScrollFrame = getReferenceByTag("INVENTORY_SCROLL_FRAME") :: ScrollingFrame?
 	screen = getReferenceByTag("INVENTORY_SCREEN")
 	inventoryItemInfo = getReferenceByTag("INVENTORY_ITEM_INFO") :: GuiObject?
@@ -1339,6 +1455,73 @@ function InventoryController:GetReferences()
 	end
 end
 
+function InventoryController:ConnectScreenControls()
+	if closeButton ~= nil and closeButton:GetAttribute(INVENTORY_CLOSE_CONNECTED_ATTRIBUTE) ~= true then
+		closeButton:SetAttribute(INVENTORY_CLOSE_CONNECTED_ATTRIBUTE, true)
+		table.insert(
+			connections,
+			closeButton.Activated:Connect(function()
+				closeInventoryUi()
+			end)
+		)
+	end
+
+	if itemEquipButton ~= nil and itemEquipButton:GetAttribute(INVENTORY_EQUIP_CONNECTED_ATTRIBUTE) ~= true then
+		itemEquipButton:SetAttribute(INVENTORY_EQUIP_CONNECTED_ATTRIBUTE, true)
+		table.insert(
+			connections,
+			itemEquipButton.Activated:Connect(function()
+				equipSelectedItem()
+			end)
+		)
+	end
+
+	if
+		abilityUpgradeButton ~= nil
+		and abilityUpgradeButton:GetAttribute(INVENTORY_UPGRADE_CONNECTED_ATTRIBUTE) ~= true
+	then
+		abilityUpgradeButton:SetAttribute(INVENTORY_UPGRADE_CONNECTED_ATTRIBUTE, true)
+		table.insert(
+			connections,
+			abilityUpgradeButton.Activated:Connect(function()
+				upgradeSelectedAbility()
+			end)
+		)
+	end
+
+	if abilitiesButton ~= nil and abilitiesButton:GetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE) ~= true then
+		abilitiesButton:SetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE, true)
+		table.insert(
+			connections,
+			abilitiesButton.Activated:Connect(function()
+				print("[InventoryController] abilities page clicked")
+				setCurrentPage(PAGE_ABILITIES)
+			end)
+		)
+	end
+
+	if skinsButton ~= nil and skinsButton:GetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE) ~= true then
+		skinsButton:SetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE, true)
+		table.insert(
+			connections,
+			skinsButton.Activated:Connect(function()
+				print("[InventoryController] skins page clicked")
+				setCurrentPage(PAGE_SKINS)
+			end)
+		)
+	end
+end
+
+refreshScreenReferences = function()
+	InventoryController:GetReferences()
+	InventoryController:ConnectScreenControls()
+	updatePageButtonsVisual()
+	clearSelectedItem()
+	InventoryController:RenderInventory()
+	updateSelectedActionButtons()
+	syncInventoryEntryButtons()
+end
+
 function InventoryController:BuildScreen()
 	if self._didBuildScreen then
 		return
@@ -1354,77 +1537,36 @@ function InventoryController:BuildScreen()
 	setScreenVisible(false)
 	setHudVisible(true)
 	startInventoryPartWatcher()
-	updateInventoryEntryVisibility()
+	syncInventoryEntryButtons()
 
 	if inventoryItemInfo ~= nil then
 		inventoryItemInfo.Visible = false
 	end
 
-	if closeButton ~= nil then
-		table.insert(
-			connections,
-			closeButton.Activated:Connect(function()
-				closeInventoryUi()
-			end)
-		)
-	end
-
-	if inventoryButton ~= nil then
-		print("[InventoryController] inventory button connected")
-
-		table.insert(
-			connections,
-			inventoryButton.Activated:Connect(function()
-				print("[InventoryController] inventory button clicked")
-				InventoryController:Open()
-			end)
-		)
-	else
+	if inventoryButton == nil then
 		warn("[InventoryController] inventory button not found")
 	end
 
-	if itemEquipButton ~= nil then
-		table.insert(
-			connections,
-			itemEquipButton.Activated:Connect(function()
-				equipSelectedItem()
-			end)
-		)
-	end
+	table.insert(
+		connections,
+		CollectionService:GetInstanceAddedSignal("INVENTORY_BUTTON"):Connect(connectInventoryEntryButton)
+	)
+	table.insert(
+		connections,
+		CollectionService:GetInstanceAddedSignal("INVENTORY_SCREEN"):Connect(handleInventoryScreenAdded)
+	)
+	table.insert(connections, CollectionService:GetInstanceAddedSignal("SIDEMENU"):Connect(handleSideMenuAdded))
 
-	if abilityUpgradeButton ~= nil then
-		table.insert(
-			connections,
-			abilityUpgradeButton.Activated:Connect(function()
-				upgradeSelectedAbility()
-			end)
-		)
-	end
+	self:ConnectScreenControls()
 
 	if abilitiesButton ~= nil then
 		print("[InventoryController] abilities button connected")
-
-		table.insert(
-			connections,
-			abilitiesButton.Activated:Connect(function()
-				print("[InventoryController] abilities page clicked")
-				setCurrentPage(PAGE_ABILITIES)
-			end)
-		)
 	else
 		warn("[InventoryController] abilities button not found")
 	end
 
 	if skinsButton ~= nil then
 		print("[InventoryController] skins button connected")
-
-		table.insert(
-			connections,
-			skinsButton.Activated:Connect(function()
-				print("[InventoryController] skins page clicked")
-				setCurrentPage(PAGE_SKINS)
-			end)
-		)
 	else
 		warn("[InventoryController] skins button not found")
 	end
@@ -1434,7 +1576,7 @@ function InventoryController:BuildScreen()
 		localPlayer:GetAttributeChangedSignal("PlayerState"):Connect(function()
 			updateInventoryEntryVisibility()
 
-			if isLocalPlayerAliveInRound() then
+			if isLocalPlayerLockedForRound() then
 				closeInventoryUi()
 			end
 		end)
@@ -1551,12 +1693,13 @@ function InventoryController:OnInventoryChanged(callback: (InventorySnapshot?, a
 end
 
 function InventoryController:Open()
-	if isLocalPlayerAliveInRound() then
+	if isLocalPlayerLockedForRound() then
 		closeInventoryUi()
 		updateInventoryEntryVisibility()
 		return
 	end
 
+	refreshScreenReferences()
 	setScreenVisible(true)
 	setHudVisible(false)
 
