@@ -839,6 +839,37 @@ local function clearGeneratedRows()
 	clearRowItemClones(unownedRowTemplate)
 end
 
+local function updateInventoryCanvasSize()
+	if inventoryScrollFrame == nil then
+		return
+	end
+
+	local contentHeight = 0
+	local layout = inventoryScrollFrame:FindFirstChildWhichIsA("UIListLayout")
+
+	if layout ~= nil then
+		contentHeight = layout.AbsoluteContentSize.Y
+	else
+		local scrollTop = inventoryScrollFrame.AbsolutePosition.Y
+
+		for _, child in inventoryScrollFrame:GetChildren() do
+			if child:IsA("GuiObject") and child.Visible then
+				local childBottom = child.AbsolutePosition.Y - scrollTop + child.AbsoluteSize.Y
+				contentHeight = math.max(contentHeight, childBottom)
+			end
+		end
+	end
+
+	contentHeight = math.max(0, math.ceil(contentHeight))
+	inventoryScrollFrame.CanvasSize = UDim2.fromOffset(0, contentHeight)
+
+	local maxCanvasY = math.max(0, contentHeight - inventoryScrollFrame.AbsoluteSize.Y)
+	local currentCanvasPosition = inventoryScrollFrame.CanvasPosition
+	if currentCanvasPosition.Y > maxCanvasY then
+		inventoryScrollFrame.CanvasPosition = Vector2.new(currentCanvasPosition.X, maxCanvasY)
+	end
+end
+
 local function setCloneEquippedVisible(clone: Instance, equipped: boolean)
 	local equippedImage = clone:FindFirstChild("EQUIPPED", true)
 
@@ -1321,6 +1352,7 @@ function InventoryController:RenderInventory()
 	renderItemsInRows(unownedItems, category, false, unownedRowTemplate, "Unowned", 101)
 
 	updateSelectedActionButtons()
+	task.defer(updateInventoryCanvasSize)
 end
 
 local function setCurrentPage(page: string)
