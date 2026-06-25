@@ -41,6 +41,8 @@ local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
 local SPIN_TYPE_CONNECTED_ATTRIBUTE = "ParabellumSpinTypeConnected"
 local DRAW_KIND_COIN = "Coin"
 local DRAW_KIND_ROBUX = "Robux"
+local COIN_PRICE_ICON = "rbxassetid://87190121549893"
+local ROBUX_PRICE_ICON = "rbxassetid://138110852462666"
 
 local GACHA_PART_TAG = "GACHA_PART"
 local GACHA_PART_MARGIN = 2.5
@@ -59,6 +61,10 @@ local LOCAL_DRAW_ROLL_TICK_EVENT = "Client.LocalDrawRollTick"
 local LOCAL_DRAW_ROLL_STOPPED_EVENT = "Client.LocalDrawRollStopped"
 local LOCAL_DRAW_RESULT_REVEALED_EVENT = "Client.LocalDrawResultRevealed"
 local DRAW_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumDrawEntryConnected"
+local HIGHLIGHT_TEMPLATE_FOLDER_NAME = "Template"
+local HIGHLIGHT_ITEM_TEMPLATE_NAME = "HighlightItem"
+local HIGHLIGHT_GRADIENTS_FOLDER_NAME = "Gradients"
+local HIGHLIGHT_ITEM_CLONE_ATTRIBUTE = "ParabellumHighlightItemClone"
 
 local SELECTED_STROKE_COLOR = Color3.fromRGB(193, 134, 251)
 local UNSELECTED_STROKE_COLOR = Color3.fromRGB(38, 38, 38)
@@ -77,6 +83,24 @@ local rarityColors = {
 	Epic = Color3.fromRGB(184, 110, 255),
 	Legendary = Color3.fromRGB(255, 150, 25),
 	Mythic = Color3.fromRGB(255, 70, 97),
+}
+
+local rarityHighlightStyles = {
+	Common = {
+		gradientName = "Blue",
+	},
+	Rare = {
+		gradientName = "Blue",
+	},
+	Epic = {
+		gradientName = "Purple",
+	},
+	Legendary = {
+		gradientName = "Yellow",
+	},
+	Mythic = {
+		gradientName = "Yellow",
+	},
 }
 
 type SkinDrawRewardPayload = {
@@ -125,6 +149,13 @@ type RobuxDrawProduct = {
 	count: number,
 }
 
+type HighlightVisualEntry = {
+	Category: string,
+	ItemId: string,
+	Weight: number?,
+	exclusive: boolean,
+}
+
 local screen: Instance?
 
 local coinsText: TextLabel?
@@ -143,6 +174,8 @@ local coinsDrawPrice: TextLabel?
 local spinPrices: Frame?
 local price1x: TextLabel?
 local price5x: TextLabel?
+local price1xIcon: ImageLabel?
+local price5xIcon: ImageLabel?
 
 local rngFrame: Frame?
 local chooseDrawFrame: Frame?
@@ -527,26 +560,6 @@ local function getRarityColor(rarity: string): Color3
 	return rarityColors[rarity] or Color3.fromRGB(167, 157, 194)
 end
 
-local function getSortedSpinItemFrames(): { Frame }
-	local frames = {} :: { Frame }
-
-	if spinItems == nil then
-		return frames
-	end
-
-	for _, child in spinItems:GetChildren() do
-		if child:IsA("Frame") then
-			table.insert(frames, child)
-		end
-	end
-
-	table.sort(frames, function(a, b)
-		return a.Name < b.Name
-	end)
-
-	return frames
-end
-
 local function getBestDrawEntries(drawConfig): { any }
 	local entries = {}
 
@@ -574,6 +587,192 @@ local function getBestDrawEntries(drawConfig): { any }
 	return entries
 end
 
+local function getAutoHighlightEntries(drawConfig): { HighlightVisualEntry }
+	local entries = {}
+
+	for _, entry in getBestDrawEntries(drawConfig) do
+		table.insert(entries, {
+			Category = entry.Category,
+			ItemId = entry.ItemId,
+			Weight = entry.Weight,
+			exclusive = false,
+		})
+	end
+
+	return entries
+end
+
+local function getHighlightTemplateFolder(): Folder?
+	if spinItems == nil then
+		return nil
+	end
+
+	local templateFolder = spinItems:FindFirstChild(HIGHLIGHT_TEMPLATE_FOLDER_NAME)
+	if templateFolder == nil or not templateFolder:IsA("Folder") then
+		return nil
+	end
+
+	return templateFolder
+end
+
+local function getHighlightItemTemplate(): Frame?
+	local templateFolder = getHighlightTemplateFolder()
+	if templateFolder ~= nil then
+		local template = templateFolder:FindFirstChild(HIGHLIGHT_ITEM_TEMPLATE_NAME)
+		if template ~= nil and template:IsA("Frame") then
+			template.Visible = false
+			return template
+		end
+
+		warn("[DrawController] missing Template.HighlightItem under SPIN_ITEMS")
+	end
+
+	if spinItems == nil then
+		return nil
+	end
+
+	for _, child in spinItems:GetChildren() do
+		if child:IsA("Frame") and child:GetAttribute(HIGHLIGHT_ITEM_CLONE_ATTRIBUTE) ~= true then
+			child.Visible = false
+			return child
+		end
+	end
+
+	warn("[DrawController] no highlight item template found")
+	return nil
+end
+
+local function clearHighlightItemClones()
+	if spinItems == nil then
+		return
+	end
+
+	for _, child in spinItems:GetChildren() do
+		if child:GetAttribute(HIGHLIGHT_ITEM_CLONE_ATTRIBUTE) == true then
+			child:Destroy()
+		elseif child:IsA("Frame") then
+			child.Visible = false
+		end
+	end
+end
+
+local function getHighlightGradientSource(rarity: string): UIGradient?
+	local style = rarityHighlightStyles[rarity]
+	if style == nil then
+		warn(`[DrawController] unsupported highlight rarity style: {rarity}`)
+		style = rarityHighlightStyles.Rare
+	end
+
+	local templateFolder = getHighlightTemplateFolder()
+	if templateFolder == nil then
+		return nil
+	end
+
+	local gradientsFolder = templateFolder:FindFirstChild(HIGHLIGHT_GRADIENTS_FOLDER_NAME)
+	if gradientsFolder == nil or not gradientsFolder:IsA("Folder") then
+		warn("[DrawController] missing Template.Gradients under SPIN_ITEMS")
+		return nil
+	end
+
+	local gradientName = style.gradientName
+	local gradient = gradientsFolder:FindFirstChild(gradientName)
+	if gradient ~= nil and gradient:IsA("UIGradient") then
+		return gradient
+	end
+
+	warn(`[DrawController] missing highlight gradient source: {gradientName}`)
+	return nil
+end
+
+local function applyGradientProperties(target: UIGradient, source: UIGradient)
+	target.Color = source.Color
+	target.Transparency = source.Transparency
+	target.Rotation = source.Rotation
+	target.Offset = source.Offset
+	target.Enabled = source.Enabled
+end
+
+local function applyHighlightRarityStyle(frame: Frame, rarity: string)
+	local deco = frame:FindFirstChild("Deco")
+	if deco == nil then
+		warn(`[DrawController] missing Deco folder inside {frame:GetFullName()}`)
+		return
+	end
+
+	local bg = deco:FindFirstChild("Bg")
+	if bg == nil or not bg:IsA("GuiObject") then
+		warn(`[DrawController] missing Deco.Bg inside {frame:GetFullName()}`)
+		return
+	end
+
+	local gradientSource = getHighlightGradientSource(rarity)
+	if gradientSource == nil then
+		return
+	end
+
+	local targetGradient = bg:FindFirstChildWhichIsA("UIGradient")
+	if targetGradient == nil then
+		local clonedGradient = gradientSource:Clone()
+		clonedGradient.Name = "Gradient"
+		clonedGradient.Parent = bg
+	else
+		applyGradientProperties(targetGradient, gradientSource)
+	end
+end
+
+local function findDrawEntry(drawConfig, category: string, itemId: string): any?
+	for _, entry in drawConfig.Entries do
+		if entry.Category == category and entry.ItemId == itemId then
+			return entry
+		end
+	end
+
+	return nil
+end
+
+local function getHighlightDrawEntries(drawConfig): { HighlightVisualEntry }
+	local highlights = drawConfig.Highlights
+	if type(highlights) ~= "table" or #highlights <= 0 then
+		return getAutoHighlightEntries(drawConfig)
+	end
+
+	local entries = {} :: { HighlightVisualEntry }
+
+	for _, highlight in highlights do
+		if type(highlight) ~= "table" then
+			warn("[DrawController] draw highlight entries must be tables")
+			continue
+		end
+
+		local highlightConfig = highlight :: any
+		local category = highlightConfig.Category
+		local itemId = highlightConfig.ItemId
+		if type(category) ~= "string" or type(itemId) ~= "string" then
+			warn("[DrawController] draw highlight entries need Category and ItemId")
+			continue
+		end
+
+		local entry = findDrawEntry(drawConfig, category, itemId)
+		if entry == nil then
+			warn(`[DrawController] draw highlight item is not in entries: {category}:{itemId}`)
+			continue
+		end
+
+		table.insert(entries, {
+			Category = entry.Category,
+			ItemId = entry.ItemId,
+			Weight = entry.Weight,
+			exclusive = highlightConfig.Exclusive == true,
+		})
+	end
+
+	if #entries <= 0 then
+		return getAutoHighlightEntries(drawConfig)
+	end
+
+	return entries
+end
+
 local function formatPercent(value: number): string
 	if value <= 0 then
 		return "0%"
@@ -590,16 +789,27 @@ local function getDrawRarityOdds(drawConfig): { [string]: number }
 	local rarityWeights = {}
 	local totalWeight = 0
 
-	for _, entry in drawConfig.Entries do
-		local rarity = getInventoryRarity(entry.Category, entry.ItemId)
-		local weight = entry.Weight
+	if type(drawConfig.RarityWeights) == "table" then
+		for rarity, weight in drawConfig.RarityWeights do
+			if type(rarity) ~= "string" or typeof(weight) ~= "number" then
+				continue
+			end
 
-		if type(rarity) ~= "string" or typeof(weight) ~= "number" then
-			continue
+			totalWeight += weight
+			rarityWeights[rarity] = (rarityWeights[rarity] or 0) + weight
 		end
+	else
+		for _, entry in drawConfig.Entries do
+			local rarity = getInventoryRarity(entry.Category, entry.ItemId)
+			local weight = entry.Weight
 
-		totalWeight += weight
-		rarityWeights[rarity] = (rarityWeights[rarity] or 0) + weight
+			if type(rarity) ~= "string" or typeof(weight) ~= "number" then
+				continue
+			end
+
+			totalWeight += weight
+			rarityWeights[rarity] = (rarityWeights[rarity] or 0) + weight
+		end
 	end
 
 	local rarityOdds = {}
@@ -633,6 +843,13 @@ local function updateOddsFrame()
 		end
 
 		local rarityName = rarityFrame.Name
+		local percent = rarityOdds[rarityName] or 0
+		rarityFrame.Visible = percent > 0
+
+		if percent <= 0 then
+			continue
+		end
+
 		local percentLabel = rarityFrame:FindFirstChild("Percentage")
 
 		if percentLabel == nil or not percentLabel:IsA("TextLabel") then
@@ -647,9 +864,37 @@ local function updateOddsFrame()
 			rarityLabel.TextColor3 = getRarityColor(rarityName)
 		end
 
-		local percent = rarityOdds[rarityName] or 0
 		percentLabel.Text = formatPercent(percent)
 	end
+end
+
+local function findHighlightTextLabel(root: Instance, name: string): TextLabel?
+	local found = root:FindFirstChild(name, true)
+	if found ~= nil and found:IsA("TextLabel") then
+		return found
+	end
+
+	return nil
+end
+
+local function getHighlightInfoLabels(info: Frame): (TextLabel?, TextLabel?, TextLabel?)
+	local titleLabel = findHighlightTextLabel(info, "Title")
+	local badgeInfo = info:FindFirstChild("Info")
+
+	if badgeInfo ~= nil and badgeInfo:IsA("Frame") then
+		local rarityLabel = badgeInfo:FindFirstChild("Rarity")
+		local exclusiveLabel = badgeInfo:FindFirstChild("Exclusive")
+
+		return titleLabel,
+			if rarityLabel ~= nil and rarityLabel:IsA("TextLabel")
+				then rarityLabel
+				else findHighlightTextLabel(info, "Rarity"),
+			if exclusiveLabel ~= nil and exclusiveLabel:IsA("TextLabel")
+				then exclusiveLabel
+				else findHighlightTextLabel(info, "Exclusive")
+	end
+
+	return titleLabel, findHighlightTextLabel(info, "Rarity"), findHighlightTextLabel(info, "Exclusive")
 end
 
 local function updateSpinItems()
@@ -658,24 +903,32 @@ local function updateSpinItems()
 		return
 	end
 
-	local frames = getSortedSpinItemFrames()
-	local bestEntries = getBestDrawEntries(drawConfig)
+	clearHighlightItemClones()
 
-	for index, frame in frames do
-		local entry = bestEntries[index]
-		if entry == nil then
-			continue
-		end
+	local template = getHighlightItemTemplate()
+	if template == nil or spinItems == nil then
+		return
+	end
+
+	local highlightEntries = getHighlightDrawEntries(drawConfig)
+
+	for index, entry in highlightEntries do
+		local frame = template:Clone()
+		frame.Name = `HighlightItem_{index}`
+		frame.LayoutOrder = index
+		frame:SetAttribute(HIGHLIGHT_ITEM_CLONE_ATTRIBUTE, true)
+		frame.Parent = spinItems
 
 		local info = frame:FindFirstChild("Info")
 		if info == nil or not info:IsA("Frame") then
 			warn(`[DrawController] missing Info frame inside {frame:GetFullName()}`)
+			frame.Visible = false
 			continue
 		end
 
-		local rarityLabel = info:FindFirstChild("Rarity")
-		local titleLabel = info:FindFirstChild("Title")
+		local titleLabel, rarityLabel, exclusiveLabel = getHighlightInfoLabels(info)
 		local rarity = getInventoryRarity(entry.Category, entry.ItemId)
+		applyHighlightRarityStyle(frame, rarity)
 
 		if rarityLabel ~= nil and rarityLabel:IsA("TextLabel") then
 			rarityLabel.Text = rarity
@@ -689,6 +942,15 @@ local function updateSpinItems()
 		else
 			warn(`[DrawController] missing Info.Title TextLabel inside {frame:GetFullName()}`)
 		end
+
+		if exclusiveLabel ~= nil and exclusiveLabel:IsA("TextLabel") then
+			exclusiveLabel.Text = "Exclusive!"
+			exclusiveLabel.Visible = entry.exclusive
+		elseif entry.exclusive then
+			warn(`[DrawController] missing Info.Exclusive TextLabel inside {frame:GetFullName()}`)
+		end
+
+		frame.Visible = true
 	end
 end
 
@@ -729,6 +991,16 @@ local function setDrawButtonEnabled(button: TextButton?, enabled: boolean)
 	button.BackgroundTransparency = if enabled then 1 else 0.85
 end
 
+local function setPriceIcons(image: string)
+	if price1xIcon ~= nil then
+		price1xIcon.Image = image
+	end
+
+	if price5xIcon ~= nil then
+		price5xIcon.Image = image
+	end
+end
+
 local function isCoinDrawCountAllowed(drawConfig, count: number): boolean
 	local allowedCounts = drawConfig.AllowedCounts
 	if type(allowedCounts) ~= "table" then
@@ -751,6 +1023,8 @@ local function updateDrawPrices()
 	end
 
 	if resolvedDraw.kind == DRAW_KIND_ROBUX then
+		setPriceIcons(ROBUX_PRICE_ICON)
+
 		local product1x = findRobuxDrawProduct(currentDrawId, 1)
 		local product5x = findRobuxDrawProduct(currentDrawId, 5)
 
@@ -784,6 +1058,8 @@ local function updateDrawPrices()
 
 		return
 	end
+
+	setPriceIcons(COIN_PRICE_ICON)
 
 	local drawConfig = resolvedDraw.config
 	local cost = drawConfig.Cost
@@ -1810,6 +2086,20 @@ function DrawController:GetReferences()
 
 		if foundPrice5x ~= nil and foundPrice5x:IsA("TextLabel") then
 			price5x = foundPrice5x
+		end
+	end
+
+	if coinsDrawPrice ~= nil and coinsDrawPrice.Parent ~= nil then
+		local icon = coinsDrawPrice.Parent:FindFirstChild("Icon")
+		if icon ~= nil and icon:IsA("ImageLabel") then
+			price1xIcon = icon
+		end
+	end
+
+	if gemsDrawPrice ~= nil and gemsDrawPrice.Parent ~= nil then
+		local icon = gemsDrawPrice.Parent:FindFirstChild("Icon")
+		if icon ~= nil and icon:IsA("ImageLabel") then
+			price5xIcon = icon
 		end
 	end
 end
