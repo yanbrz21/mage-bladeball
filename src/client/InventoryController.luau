@@ -14,7 +14,8 @@ local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
 local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
 
-local DrawController = require(Parabellum:WaitForChild("DrawController"))
+local DrawConfig = require(Config:WaitForChild("DrawConfig"))
+local DrawController: any = require(Parabellum:WaitForChild("DrawController"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
@@ -35,9 +36,6 @@ local CATEGORY_WEAPON_SKIN = "WeaponSkin"
 
 local PAGE_ABILITIES = "Abilities"
 local PAGE_SKINS = "Skins"
-
-local ABILITY_DRAW_ID = "NormalAbilityDraw"
-local SKIN_DRAW_ID = "NormalSkinDraw"
 
 local INVENTORY_PART_TAG = "INVENTORY_PART"
 local INVENTORY_PART_MARGIN = 2.5
@@ -596,32 +594,10 @@ local function getDefaultItemId(category: string): string?
 end
 
 getItemRarity = function(category: string, itemId: string): string
-	local drawCatalog = EconomyConfig.DrawCatalog :: any
+	local itemConfig = getInventoryItemConfig(category, itemId)
 
-	for _, drawConfig in drawCatalog do
-		if type(drawConfig) ~= "table" or type(drawConfig.Entries) ~= "table" then
-			continue
-		end
-
-		for _, entry in drawConfig.Entries do
-			if entry.Category == category and entry.ItemId == itemId and type(entry.Rarity) == "string" then
-				return entry.Rarity
-			end
-		end
-	end
-
-	local tokenShopCatalog = (EconomyConfig :: any).SkinTokenShopCatalog
-
-	if type(tokenShopCatalog) == "table" then
-		local categoryShop = tokenShopCatalog[category]
-
-		if type(categoryShop) == "table" then
-			local shopItem = categoryShop[itemId]
-
-			if type(shopItem) == "table" and type(shopItem.Rarity) == "string" then
-				return shopItem.Rarity
-			end
-		end
+	if itemConfig ~= nil and type(itemConfig.Rarity) == "string" and itemConfig.Rarity ~= "" then
+		return itemConfig.Rarity
 	end
 
 	return "Common"
@@ -1193,20 +1169,31 @@ local function clearSelectedItem()
 	updateSelectedActionButtons()
 end
 
-local function getDrawIdForCategory(category: string): string?
-	if category == CATEGORY_ABILITY then
-		return ABILITY_DRAW_ID
-	end
+local function getDrawIdForItem(category: string, itemId: string): string?
+	local drawCatalog = DrawConfig.DrawCatalog :: any
+	for _, drawId in DrawConfig.DrawOrder do
+		local drawConfig = drawCatalog[drawId]
+		if type(drawId) ~= "string" or type(drawConfig) ~= "table" then
+			continue
+		end
 
-	if category == CATEGORY_WEAPON_SKIN then
-		return SKIN_DRAW_ID
+		local entries = drawConfig.Entries
+		if type(entries) ~= "table" then
+			continue
+		end
+
+		for _, entry in entries do
+			if type(entry) == "table" and entry.Category == category and entry.ItemId == itemId then
+				return drawId
+			end
+		end
 	end
 
 	return nil
 end
 
-local function openDrawForCategory(category: string)
-	local drawId = getDrawIdForCategory(category)
+local function openDrawForItem(category: string, itemId: string)
+	local drawId = getDrawIdForItem(category, itemId)
 	if drawId == nil then
 		return
 	end
@@ -1222,7 +1209,7 @@ local function equipSelectedItem()
 	end
 
 	if not selectedItemOwned then
-		openDrawForCategory(selectedCategory)
+		openDrawForItem(selectedCategory, selectedItemId)
 		return
 	end
 

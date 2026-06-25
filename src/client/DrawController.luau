@@ -1,6 +1,7 @@
 --!strict
 
 local CollectionService = game:GetService("CollectionService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -12,6 +13,7 @@ local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 
+local DrawConfig = require(Config:WaitForChild("DrawConfig"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local EventBus = require(Packages.CommonKit.EventBus)
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
@@ -36,6 +38,9 @@ local DRAW_ID_ATTRIBUTE = "ID"
 local SELECTED_ATTRIBUTE = "SELECTED"
 local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
 local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
+local SPIN_TYPE_CONNECTED_ATTRIBUTE = "ParabellumSpinTypeConnected"
+local DRAW_KIND_COIN = "Coin"
+local DRAW_KIND_ROBUX = "Robux"
 
 local GACHA_PART_TAG = "GACHA_PART"
 local GACHA_PART_MARGIN = 2.5
@@ -106,6 +111,20 @@ type RollVisualItem = {
 	rarity: string,
 }
 
+type ResolvedDraw = {
+	drawId: string,
+	kind: string,
+	config: any,
+}
+
+type RobuxDrawProduct = {
+	productKey: string,
+	productId: number,
+	robuxPrice: number,
+	displayName: string,
+	count: number,
+}
+
 local screen: Instance?
 
 local coinsText: TextLabel?
@@ -138,7 +157,7 @@ local spinTypesButtons: { Instance } = {}
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
-local currentDrawId = "NormalAbilityDraw"
+local currentDrawId = ""
 local currentCount = 1
 local currentBalance = 0
 
@@ -374,16 +393,82 @@ local function isInsideAnyGachaPart(): boolean
 	return false
 end
 
-local function getDrawConfig(drawId: string)
-	local drawCatalog = EconomyConfig.DrawCatalog :: any
-	local drawConfig = drawCatalog[drawId]
+local function resolveDraw(drawId: string): ResolvedDraw?
+	local drawCatalog = DrawConfig.DrawCatalog :: any
+	local coinDrawConfig = drawCatalog[drawId]
 
-	if drawConfig == nil then
-		warn(`[DrawController] invalid draw id: {drawId}`)
-		return nil
+	if type(coinDrawConfig) == "table" then
+		return {
+			drawId = drawId,
+			kind = DRAW_KIND_COIN,
+			config = coinDrawConfig,
+		}
 	end
 
-	return drawConfig
+	local robuxDrawCatalog = DrawConfig.RobuxDrawCatalog :: any
+	local robuxDrawConfig = robuxDrawCatalog[drawId]
+
+	if type(robuxDrawConfig) == "table" then
+		return {
+			drawId = drawId,
+			kind = DRAW_KIND_ROBUX,
+			config = robuxDrawConfig,
+		}
+	end
+
+	warn(`[DrawController] invalid draw id: {drawId}`)
+	return nil
+end
+
+local function getDrawConfig(drawId: string)
+	local resolvedDraw = resolveDraw(drawId)
+	return if resolvedDraw ~= nil then resolvedDraw.config else nil
+end
+
+local function getDefaultDrawId(): string
+	for _, drawId in DrawConfig.DrawOrder do
+		if type(drawId) == "string" and resolveDraw(drawId) ~= nil then
+			return drawId
+		end
+	end
+
+	return ""
+end
+
+local function findRobuxDrawProduct(drawId: string, count: number): RobuxDrawProduct?
+	local robuxCatalog = EconomyConfig.RobuxShopCatalog :: any
+
+	for productKey, productConfig in robuxCatalog do
+		if type(productKey) ~= "string" or type(productConfig) ~= "table" then
+			continue
+		end
+
+		local reward = productConfig.Reward
+		if type(reward) ~= "table" then
+			continue
+		end
+
+		if reward.Type ~= "RobuxDraw" or reward.DrawId ~= drawId or reward.Count ~= count then
+			continue
+		end
+
+		local productId = productConfig.ProductId
+		local robuxPrice = productConfig.RobuxPrice
+		local displayName = productConfig.DisplayName
+		if type(productId) ~= "number" or type(robuxPrice) ~= "number" or type(displayName) ~= "string" then
+			continue
+		end
+
+		return {
+			productKey = productKey,
+			productId = productId,
+			robuxPrice = robuxPrice,
+			displayName = displayName,
+			count = count,
+		}
+	end
+
+	return nil
 end
 
 local function getInventoryDisplayName(category: string, itemId: string): string
@@ -410,6 +495,32 @@ local function getInventoryDisplayName(category: string, itemId: string): string
 	end
 
 	return displayName
+end
+
+local function getInventoryRarity(category: string, itemId: string): string
+	local categories = InventoryConfig.Categories :: any
+	local categoryConfig = categories[category]
+
+	if type(categoryConfig) ~= "table" then
+		return "Common"
+	end
+
+	local items = categoryConfig.Items
+	if type(items) ~= "table" then
+		return "Common"
+	end
+
+	local itemConfig = items[itemId]
+	if type(itemConfig) ~= "table" then
+		return "Common"
+	end
+
+	local rarity = itemConfig.Rarity
+	if type(rarity) ~= "string" or rarity == "" then
+		return "Common"
+	end
+
+	return rarity
 end
 
 local function getRarityColor(rarity: string): Color3
@@ -444,8 +555,10 @@ local function getBestDrawEntries(drawConfig): { any }
 	end
 
 	table.sort(entries, function(a, b)
-		local leftRank = rarityRank[a.Rarity] or 0
-		local rightRank = rarityRank[b.Rarity] or 0
+		local leftRarity = getInventoryRarity(a.Category, a.ItemId)
+		local rightRarity = getInventoryRarity(b.Category, b.ItemId)
+		local leftRank = rarityRank[leftRarity] or 0
+		local rightRank = rarityRank[rightRarity] or 0
 
 		if leftRank ~= rightRank then
 			return leftRank > rightRank
@@ -478,7 +591,7 @@ local function getDrawRarityOdds(drawConfig): { [string]: number }
 	local totalWeight = 0
 
 	for _, entry in drawConfig.Entries do
-		local rarity = entry.Rarity
+		local rarity = getInventoryRarity(entry.Category, entry.ItemId)
 		local weight = entry.Weight
 
 		if type(rarity) ~= "string" or typeof(weight) ~= "number" then
@@ -562,10 +675,11 @@ local function updateSpinItems()
 
 		local rarityLabel = info:FindFirstChild("Rarity")
 		local titleLabel = info:FindFirstChild("Title")
+		local rarity = getInventoryRarity(entry.Category, entry.ItemId)
 
 		if rarityLabel ~= nil and rarityLabel:IsA("TextLabel") then
-			rarityLabel.Text = tostring(entry.Rarity)
-			rarityLabel.TextColor3 = getRarityColor(entry.Rarity)
+			rarityLabel.Text = rarity
+			rarityLabel.TextColor3 = getRarityColor(rarity)
 		else
 			warn(`[DrawController] missing Info.Rarity TextLabel inside {frame:GetFullName()}`)
 		end
@@ -591,21 +705,103 @@ local function updateCurrencyLabels()
 	end
 end
 
-local function updateDrawPrices()
-	local drawConfig = getDrawConfig(currentDrawId)
-	if drawConfig == nil then
+local function setButtonTitle(button: TextButton?, text: string)
+	if button == nil then
 		return
 	end
 
+	local title = button:FindFirstChild("Title", true)
+	if title ~= nil and title:IsA("TextLabel") then
+		title.Text = text
+	else
+		button.Text = text
+	end
+end
+
+local function setDrawButtonEnabled(button: TextButton?, enabled: boolean)
+	if button == nil then
+		return
+	end
+
+	button.Active = enabled
+	button.Interactable = enabled
+	button.AutoButtonColor = enabled
+	button.BackgroundTransparency = if enabled then 1 else 0.85
+end
+
+local function isCoinDrawCountAllowed(drawConfig, count: number): boolean
+	local allowedCounts = drawConfig.AllowedCounts
+	if type(allowedCounts) ~= "table" then
+		return false
+	end
+
+	for _, allowedCount in allowedCounts do
+		if allowedCount == count then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function updateDrawPrices()
+	local resolvedDraw = resolveDraw(currentDrawId)
+	if resolvedDraw == nil then
+		return
+	end
+
+	if resolvedDraw.kind == DRAW_KIND_ROBUX then
+		local product1x = findRobuxDrawProduct(currentDrawId, 1)
+		local product5x = findRobuxDrawProduct(currentDrawId, 5)
+
+		if price1x ~= nil then
+			price1x.Text = if product1x ~= nil then tostring(product1x.robuxPrice) else "--"
+		end
+
+		if price5x ~= nil then
+			price5x.Text = if product5x ~= nil then tostring(product5x.robuxPrice) else "--"
+		end
+
+		if coinsDrawPrice ~= nil then
+			coinsDrawPrice.Text = if product1x ~= nil then tostring(product1x.robuxPrice) else "--"
+		end
+
+		if gemsDrawPrice ~= nil then
+			gemsDrawPrice.Text = if product5x ~= nil then tostring(product5x.robuxPrice) else "--"
+		end
+
+		if spin1xButton ~= nil then
+			spin1xButton.Visible = product1x ~= nil
+			setButtonTitle(spin1xButton, "Buy x1")
+			setDrawButtonEnabled(spin1xButton, product1x ~= nil and product1x.productId > 0)
+		end
+
+		if spin5xButton ~= nil then
+			spin5xButton.Visible = product5x ~= nil
+			setButtonTitle(spin5xButton, "Buy x5")
+			setDrawButtonEnabled(spin5xButton, product5x ~= nil and product5x.productId > 0)
+		end
+
+		return
+	end
+
+	local drawConfig = resolvedDraw.config
 	local cost = drawConfig.Cost
+	if type(cost) ~= "number" or cost <= 0 then
+		warn(`[DrawController] coin draw {currentDrawId} has invalid Cost`)
+		setDrawButtonEnabled(spin1xButton, false)
+		setDrawButtonEnabled(spin5xButton, false)
+		return
+	end
+
 	local totalCost = cost * currentCount
 
 	if price1x ~= nil then
-		price1x.Text = tostring(cost)
+		price1x.Text = if isCoinDrawCountAllowed(drawConfig, 1) then tostring(cost) else "--"
 	end
 
 	if price5x ~= nil then
-		price5x.Text = tostring(cost * 5)
+		price5x.Text = if isCoinDrawCountAllowed(drawConfig, 5) then tostring(cost * 5) else "--"
 	end
 
 	if coinsDrawPrice ~= nil then
@@ -614,6 +810,18 @@ local function updateDrawPrices()
 
 	if gemsDrawPrice ~= nil then
 		gemsDrawPrice.Text = tostring(totalCost)
+	end
+
+	if spin1xButton ~= nil then
+		spin1xButton.Visible = true
+		setButtonTitle(spin1xButton, "Draw x1")
+		setDrawButtonEnabled(spin1xButton, isCoinDrawCountAllowed(drawConfig, 1))
+	end
+
+	if spin5xButton ~= nil then
+		spin5xButton.Visible = true
+		setButtonTitle(spin5xButton, "Draw x5")
+		setDrawButtonEnabled(spin5xButton, isCoinDrawCountAllowed(drawConfig, 5))
 	end
 end
 
@@ -653,6 +861,106 @@ local function updateSpinTypeButtonsVisual()
 	end
 end
 
+local function getOrderedDraws(): { ResolvedDraw }
+	local orderedDraws = {} :: { ResolvedDraw }
+
+	for _, drawId in DrawConfig.DrawOrder do
+		if type(drawId) ~= "string" then
+			warn("[DrawController] DrawOrder contains a non-string draw id")
+			continue
+		end
+
+		local resolvedDraw = resolveDraw(drawId)
+		if resolvedDraw ~= nil then
+			table.insert(orderedDraws, resolvedDraw)
+		end
+	end
+
+	return orderedDraws
+end
+
+local function setSpinTypeButtonText(button: TextButton, resolvedDraw: ResolvedDraw)
+	local titleLabel = button:FindFirstChild("Title", true)
+	local categoryLabel = button:FindFirstChild("Category", true)
+	local drawConfig = resolvedDraw.config
+
+	if titleLabel ~= nil and titleLabel:IsA("TextLabel") then
+		titleLabel.Text = drawConfig.DisplayName
+	end
+
+	if categoryLabel ~= nil and categoryLabel:IsA("TextLabel") then
+		categoryLabel.Text = if resolvedDraw.kind == DRAW_KIND_ROBUX then "Robux" else "Coins"
+	end
+end
+
+local function getSortedTaggedSpinTypeButtons(): { TextButton }
+	local buttons = {} :: { TextButton }
+
+	for _, instance in CollectionService:GetTagged("SPIN_TYPE_BUTTON") do
+		if instance:IsDescendantOf(playerGui) and instance:IsA("TextButton") then
+			table.insert(buttons, instance)
+		end
+	end
+
+	table.sort(buttons, function(left, right)
+		if left.LayoutOrder ~= right.LayoutOrder then
+			return left.LayoutOrder < right.LayoutOrder
+		end
+
+		return left.Name < right.Name
+	end)
+
+	return buttons
+end
+
+local function syncSpinTypeButtonsWithConfig()
+	local orderedDraws = getOrderedDraws()
+	local existingButtons = getSortedTaggedSpinTypeButtons()
+	local template: TextButton? = existingButtons[1]
+
+	if template == nil then
+		warn("[DrawController] no SPIN_TYPE_BUTTON template found")
+		spinTypesButtons = {}
+		return
+	end
+
+	for index, resolvedDraw in orderedDraws do
+		local button: TextButton? = existingButtons[index]
+		if button == nil then
+			local clonedButton = template:Clone() :: TextButton
+			clonedButton.Parent = template.Parent
+			CollectionService:AddTag(clonedButton, "SPIN_TYPE_BUTTON")
+			button = clonedButton
+		end
+
+		local resolvedButton = button :: TextButton
+		resolvedButton.Name = resolvedDraw.drawId
+		resolvedButton.LayoutOrder = index
+		resolvedButton.Visible = true
+		resolvedButton:SetAttribute(DRAW_ID_ATTRIBUTE, resolvedDraw.drawId)
+		resolvedButton:SetAttribute(SELECTED_ATTRIBUTE, false)
+		resolvedButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
+		setSpinTypeButtonText(resolvedButton, resolvedDraw)
+	end
+
+	for index = #orderedDraws + 1, #existingButtons do
+		local button = existingButtons[index]
+		button.Visible = false
+		button:SetAttribute(DRAW_ID_ATTRIBUTE, nil)
+		button:SetAttribute(SPIN_TYPE_CONNECTED_ATTRIBUTE, nil)
+		CollectionService:RemoveTag(button, "SPIN_TYPE_BUTTON")
+	end
+
+	spinTypesButtons = {}
+	for _, button in getSortedTaggedSpinTypeButtons() do
+		table.insert(spinTypesButtons, button)
+	end
+
+	if currentDrawId == "" or resolveDraw(currentDrawId) == nil then
+		currentDrawId = getDefaultDrawId()
+	end
+end
+
 local function setCurrentDraw(drawId: string)
 	local drawConfig = getDrawConfig(drawId)
 	if drawConfig == nil then
@@ -663,7 +971,9 @@ local function setCurrentDraw(drawId: string)
 
 	print(`[DrawController] selected draw: {drawId}`)
 	print(`[DrawController] display name: {drawConfig.DisplayName}`)
-	print(`[DrawController] cost: {drawConfig.Cost}`)
+	if type(drawConfig.Cost) == "number" then
+		print(`[DrawController] cost: {drawConfig.Cost}`)
+	end
 
 	updateDrawPrices()
 	updateSpinItems()
@@ -818,7 +1128,7 @@ local function getRollVisualItemFromEntry(entry): RollVisualItem
 		category = entry.Category,
 		itemId = entry.ItemId,
 		displayName = getInventoryDisplayName(entry.Category, entry.ItemId),
-		rarity = entry.Rarity,
+		rarity = getInventoryRarity(entry.Category, entry.ItemId),
 	}
 end
 
@@ -865,8 +1175,10 @@ local function getSortedRollEntries(drawConfig): { any }
 	end
 
 	table.sort(entries, function(a, b)
-		local leftRank = rarityRank[a.Rarity] or 0
-		local rightRank = rarityRank[b.Rarity] or 0
+		local leftRarity = getInventoryRarity(a.Category, a.ItemId)
+		local rightRarity = getInventoryRarity(b.Category, b.ItemId)
+		local leftRank = rarityRank[leftRarity] or 0
+		local rightRank = rarityRank[rightRarity] or 0
 
 		if leftRank ~= rightRank then
 			return leftRank > rightRank
@@ -1226,17 +1538,13 @@ local function handleSkinDrawResult(payload: SkinDrawResultPayload)
 	startRollSequence(payload)
 end
 
-local function requestDraw(count: number)
-	if isDrawing or isRolling or isWaitingForDrawResult then
-		return
-	end
-
-	local drawConfig = getDrawConfig(currentDrawId)
-	if drawConfig == nil then
-		return
-	end
-
+local function requestCoinDraw(drawConfig: any, count: number)
 	readBalanceAttribute()
+
+	if type(drawConfig.Cost) ~= "number" or drawConfig.Cost <= 0 then
+		warn(`[DrawController] coin draw {currentDrawId} has invalid Cost`)
+		return
+	end
 
 	local cost = drawConfig.Cost * count
 	if currentBalance < cost then
@@ -1262,6 +1570,76 @@ local function requestDraw(count: number)
 	})
 end
 
+local function requestRobuxDraw(count: number)
+	local product = findRobuxDrawProduct(currentDrawId, count)
+	if product == nil then
+		warn(`[DrawController] no Robux product configured for draw {currentDrawId} x{count}`)
+		return
+	end
+
+	if product.productId <= 0 then
+		warn(`[DrawController] Robux product {product.productKey} for draw {currentDrawId} has no ProductId configured`)
+		return
+	end
+
+	setCurrentCount(count)
+	isDrawing = true
+	isWaitingForDrawResult = true
+	isRollFinished = false
+
+	local purchaseFinishedConnection: RBXScriptConnection?
+	purchaseFinishedConnection = MarketplaceService.PromptProductPurchaseFinished:Connect(
+		function(userId: number, productId: number, wasPurchased: boolean)
+			if userId ~= localPlayer.UserId or productId ~= product.productId then
+				return
+			end
+
+			if purchaseFinishedConnection ~= nil then
+				purchaseFinishedConnection:Disconnect()
+				purchaseFinishedConnection = nil
+			end
+
+			if not wasPurchased then
+				isDrawing = false
+				isWaitingForDrawResult = false
+				setGuiVisible(chooseDrawFrame, true)
+				setGuiVisible(rngFrame, false)
+				updateDrawPrices()
+			end
+		end
+	)
+
+	local ok, err = pcall(MarketplaceService.PromptProductPurchase, MarketplaceService, localPlayer, product.productId)
+	if not ok then
+		if purchaseFinishedConnection ~= nil then
+			purchaseFinishedConnection:Disconnect()
+			purchaseFinishedConnection = nil
+		end
+
+		isDrawing = false
+		isWaitingForDrawResult = false
+		warn(`[DrawController] failed to prompt Robux product {product.productKey}: {tostring(err)}`)
+	end
+end
+
+local function requestDraw(count: number)
+	if isDrawing or isRolling or isWaitingForDrawResult then
+		return
+	end
+
+	local resolvedDraw = resolveDraw(currentDrawId)
+	if resolvedDraw == nil then
+		return
+	end
+
+	if resolvedDraw.kind == DRAW_KIND_ROBUX then
+		requestRobuxDraw(count)
+		return
+	end
+
+	requestCoinDraw(resolvedDraw.config, count)
+end
+
 local function onDrawButtonClicked(count: number)
 	requestDraw(count)
 end
@@ -1269,7 +1647,7 @@ end
 local function connectSpinTypeButtons()
 	print("[DrawController] connect spin type buttons")
 
-	spinTypesButtons = CollectionService:GetTagged("SPIN_TYPE_BUTTON")
+	syncSpinTypeButtonsWithConfig()
 
 	for _, instance in spinTypesButtons do
 		if not instance:IsDescendantOf(playerGui) then
@@ -1285,15 +1663,23 @@ local function connectSpinTypeButtons()
 		local drawId = button:GetAttribute(DRAW_ID_ATTRIBUTE)
 		button:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
 
+		if button:GetAttribute(SPIN_TYPE_CONNECTED_ATTRIBUTE) == true then
+			continue
+		end
+
 		if type(drawId) ~= "string" then
 			warn(`[DrawController] missing/invalid {DRAW_ID_ATTRIBUTE} attribute on {button:GetFullName()}`)
 			continue
 		end
 
+		button:SetAttribute(SPIN_TYPE_CONNECTED_ATTRIBUTE, true)
 		table.insert(
 			connections,
 			button.Activated:Connect(function()
-				setCurrentDraw(drawId)
+				local currentButtonDrawId = button:GetAttribute(DRAW_ID_ATTRIBUTE)
+				if type(currentButtonDrawId) == "string" then
+					setCurrentDraw(currentButtonDrawId)
+				end
 			end)
 		)
 	end
@@ -1430,6 +1816,7 @@ end
 
 function DrawController:BuildUI()
 	if didBuildUI then
+		syncSpinTypeButtonsWithConfig()
 		updateCurrencyLabels()
 		updateDrawPrices()
 		updateSpinItems()
@@ -1441,6 +1828,7 @@ function DrawController:BuildUI()
 	didBuildUI = true
 
 	self:GetReferences()
+	syncSpinTypeButtonsWithConfig()
 
 	setScreenEnabled(false)
 	setHudVisible(true)
@@ -1569,6 +1957,7 @@ function DrawController:Open()
 
 	setScreenEnabled(true)
 	setHudVisible(false)
+	syncSpinTypeButtonsWithConfig()
 
 	if not isDrawing and not isRolling and not isWaitingForDrawResult and not isRollFinished then
 		setGuiVisible(chooseDrawFrame, true)
