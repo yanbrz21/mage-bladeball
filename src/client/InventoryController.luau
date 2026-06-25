@@ -207,6 +207,54 @@ local function setGuiVisible(instance: Instance?, visible: boolean)
 	end
 end
 
+local function isGuiActionEnabled(instance: GuiObject): boolean
+	if not instance.Visible then
+		return false
+	end
+
+	if instance:IsA("GuiButton") then
+		return instance.Active and instance.Interactable
+	end
+
+	return true
+end
+
+local function connectGuiAction(instance: GuiObject, callback: () -> ())
+	local lastActionAt = 0
+
+	local function fireAction()
+		if not isGuiActionEnabled(instance) then
+			return
+		end
+
+		local now = os.clock()
+		if now - lastActionAt < 0.12 then
+			return
+		end
+
+		lastActionAt = now
+		callback()
+	end
+
+	if instance:IsA("GuiButton") then
+		table.insert(connections, instance.Activated:Connect(fireAction))
+	else
+		instance.Active = true
+	end
+
+	table.insert(
+		connections,
+		instance.InputBegan:Connect(function(input: InputObject)
+			if
+				input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch
+			then
+				fireAction()
+			end
+		end)
+	)
+end
+
 local function preventGuiResetOnSpawn(instance: Instance?)
 	local current = instance
 	while current ~= nil do
@@ -265,13 +313,10 @@ local function connectInventoryEntryButton(instance: Instance)
 	end
 
 	instance:SetAttribute(INVENTORY_ENTRY_CONNECTED_ATTRIBUTE, true)
-	table.insert(
-		connections,
-		instance.Activated:Connect(function()
-			print("[InventoryController] inventory button clicked")
-			InventoryController:Open()
-		end)
-	)
+	connectGuiAction(instance, function()
+		print("[InventoryController] inventory button clicked")
+		InventoryController:Open()
+	end)
 end
 
 local function syncInventoryEntryButtons()
@@ -1334,12 +1379,9 @@ local function createInventoryItem(row: Frame, category: string, itemId: string,
 		return
 	end
 
-	table.insert(
-		connections,
-		clickable.Activated:Connect(function()
-			selectItem(category, itemId, owned)
-		end)
-	)
+	connectGuiAction(clickable, function()
+		selectItem(category, itemId, owned)
+	end)
 end
 
 local function getOrCreateRow(baseRow: Frame?, rowName: string, rowIndex: number, layoutOrder: number): Frame?
@@ -1558,22 +1600,12 @@ end
 function InventoryController:ConnectScreenControls()
 	if closeButton ~= nil and closeButton:GetAttribute(INVENTORY_CLOSE_CONNECTED_ATTRIBUTE) ~= true then
 		closeButton:SetAttribute(INVENTORY_CLOSE_CONNECTED_ATTRIBUTE, true)
-		table.insert(
-			connections,
-			closeButton.Activated:Connect(function()
-				closeInventoryUi()
-			end)
-		)
+		connectGuiAction(closeButton, closeInventoryUi)
 	end
 
 	if itemEquipButton ~= nil and itemEquipButton:GetAttribute(INVENTORY_EQUIP_CONNECTED_ATTRIBUTE) ~= true then
 		itemEquipButton:SetAttribute(INVENTORY_EQUIP_CONNECTED_ATTRIBUTE, true)
-		table.insert(
-			connections,
-			itemEquipButton.Activated:Connect(function()
-				equipSelectedItem()
-			end)
-		)
+		connectGuiAction(itemEquipButton, equipSelectedItem)
 	end
 
 	if
@@ -1581,34 +1613,23 @@ function InventoryController:ConnectScreenControls()
 		and abilityUpgradeButton:GetAttribute(INVENTORY_UPGRADE_CONNECTED_ATTRIBUTE) ~= true
 	then
 		abilityUpgradeButton:SetAttribute(INVENTORY_UPGRADE_CONNECTED_ATTRIBUTE, true)
-		table.insert(
-			connections,
-			abilityUpgradeButton.Activated:Connect(function()
-				upgradeSelectedAbility()
-			end)
-		)
+		connectGuiAction(abilityUpgradeButton, upgradeSelectedAbility)
 	end
 
 	if abilitiesButton ~= nil and abilitiesButton:GetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE) ~= true then
 		abilitiesButton:SetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE, true)
-		table.insert(
-			connections,
-			abilitiesButton.Activated:Connect(function()
-				print("[InventoryController] abilities page clicked")
-				setCurrentPage(PAGE_ABILITIES)
-			end)
-		)
+		connectGuiAction(abilitiesButton, function()
+			print("[InventoryController] abilities page clicked")
+			setCurrentPage(PAGE_ABILITIES)
+		end)
 	end
 
 	if skinsButton ~= nil and skinsButton:GetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE) ~= true then
 		skinsButton:SetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE, true)
-		table.insert(
-			connections,
-			skinsButton.Activated:Connect(function()
-				print("[InventoryController] skins page clicked")
-				setCurrentPage(PAGE_SKINS)
-			end)
-		)
+		connectGuiAction(skinsButton, function()
+			print("[InventoryController] skins page clicked")
+			setCurrentPage(PAGE_SKINS)
+		end)
 	end
 end
 

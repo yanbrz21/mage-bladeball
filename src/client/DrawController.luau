@@ -277,6 +277,54 @@ local function setGuiVisible(instance: Instance?, visible: boolean)
 	end
 end
 
+local function isGuiActionEnabled(instance: GuiObject): boolean
+	if not instance.Visible then
+		return false
+	end
+
+	if instance:IsA("GuiButton") then
+		return instance.Active and instance.Interactable
+	end
+
+	return true
+end
+
+local function connectGuiAction(instance: GuiObject, callback: () -> ())
+	local lastActionAt = 0
+
+	local function fireAction()
+		if not isGuiActionEnabled(instance) then
+			return
+		end
+
+		local now = os.clock()
+		if now - lastActionAt < 0.12 then
+			return
+		end
+
+		lastActionAt = now
+		callback()
+	end
+
+	if instance:IsA("GuiButton") then
+		table.insert(connections, instance.Activated:Connect(fireAction))
+	else
+		instance.Active = true
+	end
+
+	table.insert(
+		connections,
+		instance.InputBegan:Connect(function(input: InputObject)
+			if
+				input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch
+			then
+				fireAction()
+			end
+		end)
+	)
+end
+
 local function preventGuiResetOnSpawn(instance: Instance?)
 	local current = instance
 	while current ~= nil do
@@ -335,13 +383,10 @@ local function connectDrawEntryButton(instance: Instance)
 	end
 
 	instance:SetAttribute(DRAW_ENTRY_CONNECTED_ATTRIBUTE, true)
-	table.insert(
-		connections,
-		instance.Activated:Connect(function()
-			print("[DrawController] draw button clicked")
-			DrawController:Open()
-		end)
-	)
+	connectGuiAction(instance, function()
+		print("[DrawController] draw button clicked")
+		DrawController:Open()
+	end)
 end
 
 local function syncDrawEntryButtons()
@@ -1949,15 +1994,12 @@ local function connectSpinTypeButtons()
 		end
 
 		button:SetAttribute(SPIN_TYPE_CONNECTED_ATTRIBUTE, true)
-		table.insert(
-			connections,
-			button.Activated:Connect(function()
-				local currentButtonDrawId = button:GetAttribute(DRAW_ID_ATTRIBUTE)
-				if type(currentButtonDrawId) == "string" then
-					setCurrentDraw(currentButtonDrawId)
-				end
-			end)
-		)
+		connectGuiAction(button, function()
+			local currentButtonDrawId = button:GetAttribute(DRAW_ID_ATTRIBUTE)
+			if type(currentButtonDrawId) == "string" then
+				setCurrentDraw(currentButtonDrawId)
+			end
+		end)
 	end
 
 	updateSpinTypeButtonsVisual()
@@ -1975,29 +2017,11 @@ local function connectDrawClose()
 	end
 
 	if drawClose:IsA("GuiButton") then
-		table.insert(
-			connections,
-			drawClose.Activated:Connect(function()
-				closeDrawUi()
-			end)
-		)
-
+		connectGuiAction(drawClose, closeDrawUi)
 		return
 	end
 
-	drawClose.Active = true
-
-	table.insert(
-		connections,
-		drawClose.InputBegan:Connect(function(input: InputObject)
-			if
-				input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
-				closeDrawUi()
-			end
-		end)
-	)
+	connectGuiAction(drawClose, closeDrawUi)
 end
 
 local function startGachaPartWatcher()
@@ -2145,38 +2169,29 @@ function DrawController:BuildUI()
 	connectDrawClose()
 
 	if spin1xButton ~= nil then
-		table.insert(
-			connections,
-			spin1xButton.Activated:Connect(function()
-				onDrawButtonClicked(1)
-			end)
-		)
+		connectGuiAction(spin1xButton, function()
+			onDrawButtonClicked(1)
+		end)
 	end
 
 	if spin5xButton ~= nil then
-		table.insert(
-			connections,
-			spin5xButton.Activated:Connect(function()
-				onDrawButtonClicked(5)
-			end)
-		)
+		connectGuiAction(spin5xButton, function()
+			onDrawButtonClicked(5)
+		end)
 	end
 
 	if skipDrawButton ~= nil then
-		table.insert(
-			connections,
-			skipDrawButton.Activated:Connect(function()
-				if isRolling or isWaitingForDrawResult then
-					skipRoll()
-					return
-				end
+		connectGuiAction(skipDrawButton, function()
+			if isRolling or isWaitingForDrawResult then
+				skipRoll()
+				return
+			end
 
-				if isRollFinished then
-					claimRollUi()
-					return
-				end
-			end)
-		)
+			if isRollFinished then
+				claimRollUi()
+				return
+			end
+		end)
 	end
 
 	connectSpinTypeButtons()
