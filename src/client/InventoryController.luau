@@ -493,14 +493,35 @@ local function setUpgradeButtonEnabled(enabled: boolean)
 	setActionButtonVisual(abilityUpgradeButton, enabled)
 end
 
-local function getAbilityLevelValue(abilityId: string): number
-	local snapshot = currentInventorySnapshot
-	if snapshot == nil then
+local function getAbilityInitialLevel(abilityId: string): number
+	local abilityCategory = (InventoryConfig.Categories :: any).Ability
+	if type(abilityCategory) ~= "table" or type(abilityCategory.Items) ~= "table" then
 		return 1
 	end
 
+	local abilityItem = abilityCategory.Items[abilityId]
+	if type(abilityItem) ~= "table" or type(abilityItem.Rarity) ~= "string" then
+		return 1
+	end
+
+	local upgradeConfig = (EconomyConfig :: any).AbilityUpgrade
+	if type(upgradeConfig) ~= "table" or type(upgradeConfig.InitialLevelByRarity) ~= "table" then
+		return 1
+	end
+
+	local initialLevel = upgradeConfig.InitialLevelByRarity[abilityItem.Rarity]
+	return if type(initialLevel) == "number" and initialLevel >= 1 then math.floor(initialLevel) else 1
+end
+
+local function getAbilityLevelValue(abilityId: string): number
+	local initialLevel = getAbilityInitialLevel(abilityId)
+	local snapshot = currentInventorySnapshot
+	if snapshot == nil then
+		return initialLevel
+	end
+
 	local level = snapshot.abilityLevels[abilityId]
-	return if type(level) == "number" and level >= 1 then math.floor(level) else 1
+	return if type(level) == "number" and level >= initialLevel then math.floor(level) else initialLevel
 end
 
 local function getAbilityFragments(abilityId: string): number
@@ -530,11 +551,13 @@ local function getAbilityUpgradeCost(abilityId: string): number?
 	end
 
 	local upgradeConfig = (EconomyConfig :: any).AbilityUpgrade
-	if type(upgradeConfig) ~= "table" or type(upgradeConfig.FragmentCostsByNextLevel) ~= "table" then
+	if type(upgradeConfig) ~= "table" or type(upgradeConfig.FragmentCostsByNextLevelOffset) ~= "table" then
 		return nil
 	end
 
-	local cost = upgradeConfig.FragmentCostsByNextLevel[currentLevel + 1]
+	local nextLevel = currentLevel + 1
+	local nextLevelOffset = nextLevel - getAbilityInitialLevel(abilityId)
+	local cost = upgradeConfig.FragmentCostsByNextLevelOffset[nextLevelOffset]
 	return if type(cost) == "number" and cost > 0 then math.floor(cost) else nil
 end
 
