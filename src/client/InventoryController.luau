@@ -17,7 +17,9 @@ local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
 local DrawConfig = require(Config:WaitForChild("DrawConfig"))
 local DrawController: any = require(Parabellum:WaitForChild("DrawController"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
+local InventoryAbilityText = require(Parabellum:WaitForChild("InventoryAbilityText"))
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
+local InventoryUpgradeConfirm = require(Parabellum:WaitForChild("InventoryUpgradeConfirm"))
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
 
@@ -71,8 +73,8 @@ local PROGRESS_FILL_COLOR = Color3.fromRGB(97, 235, 164)
 local PROGRESS_READY_FILL_COLOR = Color3.fromRGB(248, 210, 86)
 local ACTION_BUTTON_DISABLED_TEXT_COLOR = Color3.fromRGB(150, 150, 150)
 local ACTION_BUTTON_DISABLED_IMAGE_COLOR = Color3.fromRGB(105, 105, 105)
-local ACTION_BUTTON_SIZE = UDim2.new(0.925853252, 0, 0.105, 0)
-local HIDDEN_ACTION_BUTTON_SIZE = UDim2.new(0.925853252, 0, 0, 0)
+local ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0.105)
+local HIDDEN_ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0)
 
 local ORIGINAL_TEXT_COLOR_ATTRIBUTE = "OriginalActionTextColor"
 local ORIGINAL_TEXT_TRANSPARENCY_ATTRIBUTE = "OriginalActionTextTransparency"
@@ -308,6 +310,7 @@ local function handleSideMenuAdded(instance: Instance)
 end
 
 local function closeInventoryUi()
+	InventoryUpgradeConfirm.Hide()
 	setScreenVisible(false)
 	setHudVisible(true)
 end
@@ -1092,7 +1095,7 @@ local function setCloneAbilityProgress(clone: GuiObject, category: string, itemI
 		return
 	end
 
-	fill.Size = UDim2.new(fillRatio, 0, 1, 0)
+	fill.Size = UDim2.fromScale(fillRatio, 1)
 	fill.BackgroundColor3 = if cost ~= nil and fragments >= cost then PROGRESS_READY_FILL_COLOR else PROGRESS_FILL_COLOR
 
 	local label = progress:FindFirstChild(ABILITY_PROGRESS_TEXT_NAME)
@@ -1141,17 +1144,9 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 	end
 
 	if itemDescription ~= nil then
-		if category == CATEGORY_ABILITY and owned then
+		if category == CATEGORY_ABILITY then
 			local level = getAbilityLevelValue(itemId)
-			local maxLevel = getAbilityMaxLevel()
-			local fragments = getAbilityFragments(itemId)
-			local cost = getAbilityUpgradeCost(itemId)
-
-			if cost == nil or level >= maxLevel then
-				itemDescription.Text = `Rarity: {rarity}\nLevel: {level}/{maxLevel}\nFragments: MAX`
-			else
-				itemDescription.Text = `Rarity: {rarity}\nLevel: {level}/{maxLevel}\nFragments: {fragments}/{cost}`
-			end
+			itemDescription.Text = InventoryAbilityText.GetEffectDescription(itemId, level)
 		else
 			itemDescription.Text = `Rarity: {rarity}`
 		end
@@ -1172,6 +1167,7 @@ local function clearSelectedItem()
 	selectedCategory = nil
 	selectedItemId = nil
 	selectedItemOwned = false
+	InventoryUpgradeConfirm.Hide()
 
 	if inventoryItemInfo ~= nil then
 		inventoryItemInfo.Visible = false
@@ -1250,13 +1246,7 @@ local function equipSelectedItem()
 	})
 end
 
-local function upgradeSelectedAbility()
-	if selectedCategory ~= CATEGORY_ABILITY or selectedItemId == nil or not selectedItemOwned then
-		updateUpgradeButton()
-		return
-	end
-
-	local abilityId = selectedItemId
+local function submitUpgradeAbility(abilityId: string)
 	local cost = getAbilityUpgradeCost(abilityId)
 	if cost == nil then
 		updateUpgradeButton()
@@ -1274,6 +1264,41 @@ local function upgradeSelectedAbility()
 	requestUpgradeAbilityRemote:FireServer({
 		abilityId = abilityId,
 	})
+end
+
+local function showUpgradeConfirmation(abilityId: string)
+	local currentLevel = getAbilityLevelValue(abilityId)
+	local maxLevel = getAbilityMaxLevel()
+	local cost = getAbilityUpgradeCost(abilityId)
+	if cost == nil or currentLevel >= maxLevel then
+		updateUpgradeButton()
+		return
+	end
+
+	if getAbilityFragments(abilityId) < cost then
+		updateUpgradeButton()
+		return
+	end
+
+	local displayName = getItemDisplayName(CATEGORY_ABILITY, abilityId)
+	InventoryUpgradeConfirm.Show({
+		abilityId = abilityId,
+		bodyText = InventoryAbilityText.GetUpgradeSummary(abilityId, currentLevel),
+		cost = cost,
+		currentLevel = currentLevel,
+		displayName = displayName,
+		fragments = getAbilityFragments(abilityId),
+		onConfirm = submitUpgradeAbility,
+	})
+end
+
+local function upgradeSelectedAbility()
+	if selectedCategory ~= CATEGORY_ABILITY or selectedItemId == nil or not selectedItemOwned then
+		updateUpgradeButton()
+		return
+	end
+
+	showUpgradeConfirmation(selectedItemId)
 end
 
 local function createInventoryItem(row: Frame, category: string, itemId: string, owned: boolean, layoutOrder: number)
