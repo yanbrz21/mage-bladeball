@@ -12,6 +12,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
 local AbilityConfig = require(Config:WaitForChild("AbilityConfig"))
+local InventoryItemVisuals = require(script.Parent:WaitForChild("InventoryItemVisuals"))
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 
 local localPlayer = Players.LocalPlayer
@@ -54,6 +55,7 @@ local buttonScales: { [GuiButton]: UIScale? } = {}
 local activeTweens: { [GuiButton]: Tween? } = {}
 local readyFlashesByButton: { [GuiButton]: Frame? } = {}
 local buttonVisualDefaultsByButton: { [GuiButton]: { [Instance]: ButtonVisualDefault } } = {}
+local defaultAbilityIconImagesByButton: { [GuiButton]: string } = {}
 local defaultJumpButtonHiddenConnection: RBXScriptConnection?
 local defaultJumpButtonListenerActive = false
 
@@ -444,6 +446,71 @@ local function setButtonTitle(button: GuiButton?, text: string)
 	end
 end
 
+local function findButtonIconImage(button: GuiButton): (ImageLabel | ImageButton)?
+	local namedIcon = button:FindFirstChild("Icon", true)
+	if namedIcon ~= nil and namedIcon:IsA("ImageLabel") then
+		return namedIcon
+	elseif namedIcon ~= nil and namedIcon:IsA("ImageButton") then
+		return namedIcon
+	end
+
+	for _, descendant in button:GetDescendants() do
+		if descendant.Name == "Background" or descendant.Name == "CooldownReadyFlash" then
+			continue
+		end
+
+		if descendant:IsA("ImageLabel") then
+			return descendant
+		elseif descendant:IsA("ImageButton") then
+			return descendant
+		end
+	end
+
+	if button:IsA("ImageButton") then
+		return button
+	end
+
+	return nil
+end
+
+local function setButtonIcon(button: GuiButton?, iconAssetId: string?)
+	if button == nil then
+		return
+	end
+
+	local iconImage = findButtonIconImage(button)
+	if iconImage == nil then
+		return
+	end
+
+	if defaultAbilityIconImagesByButton[button] == nil then
+		if iconImage:IsA("ImageLabel") then
+			defaultAbilityIconImagesByButton[button] = iconImage.Image
+		elseif iconImage:IsA("ImageButton") then
+			defaultAbilityIconImagesByButton[button] = iconImage.Image
+		end
+	end
+
+	local resolvedIconAssetId = defaultAbilityIconImagesByButton[button]
+	if type(iconAssetId) == "string" and iconAssetId ~= "" then
+		resolvedIconAssetId = iconAssetId
+	end
+
+	if iconImage:IsA("ImageLabel") then
+		iconImage.Image = resolvedIconAssetId
+	elseif iconImage:IsA("ImageButton") then
+		iconImage.Image = resolvedIconAssetId
+	end
+end
+
+local function getAbilityIconAssetId(abilityId: string?): string?
+	if type(abilityId) ~= "string" or abilityId == "" then
+		return nil
+	end
+
+	return InventoryItemVisuals.GetIconAssetId("Ability", abilityId)
+end
+
 local function updateExtraAbilityDisplay()
 	local abilityData = getEquippedAbilityConfig()
 	if abilityData == nil or typeof(abilityData.DisplayName) ~= "string" then
@@ -452,6 +519,9 @@ local function updateExtraAbilityDisplay()
 
 	setButtonTitle(mobileAbilityButton, abilityData.DisplayName)
 	setButtonTitle(pcAbilityButton, abilityData.DisplayName)
+	local iconAssetId = getAbilityIconAssetId(abilityData.Id)
+	setButtonIcon(mobileAbilityButton, iconAssetId)
+	setButtonIcon(pcAbilityButton, iconAssetId)
 end
 
 local function hideOldMobileControls()

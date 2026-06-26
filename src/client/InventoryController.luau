@@ -19,6 +19,7 @@ local DrawController: any = require(Parabellum:WaitForChild("DrawController"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local InventoryAbilityText = require(Parabellum:WaitForChild("InventoryAbilityText"))
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
+local InventoryItemVisuals = require(Parabellum:WaitForChild("InventoryItemVisuals"))
 local InventoryUpgradeConfirm = require(Parabellum:WaitForChild("InventoryUpgradeConfirm"))
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
@@ -581,17 +582,7 @@ local function getInventoryItemConfig(category: string, itemId: string): any?
 end
 
 local function getItemDisplayName(category: string, itemId: string): string
-	local itemConfig = getInventoryItemConfig(category, itemId)
-
-	if itemConfig == nil then
-		return itemId
-	end
-
-	if type(itemConfig.DisplayName) ~= "string" then
-		return itemId
-	end
-
-	return itemConfig.DisplayName
+	return InventoryItemVisuals.GetDisplayName(category, itemId)
 end
 
 local function isDefaultOwnedItem(category: string, itemId: string): boolean
@@ -620,13 +611,7 @@ local function getDefaultItemId(category: string): string?
 end
 
 getItemRarity = function(category: string, itemId: string): string
-	local itemConfig = getInventoryItemConfig(category, itemId)
-
-	if itemConfig ~= nil and type(itemConfig.Rarity) == "string" and itemConfig.Rarity ~= "" then
-		return itemConfig.Rarity
-	end
-
-	return "Common"
+	return InventoryItemVisuals.GetRarity(category, itemId)
 end
 
 local function getAllItemIds(category: string): { string }
@@ -939,6 +924,38 @@ local function setCloneTitle(clone: Instance, title: string)
 	warn(`[InventoryController] missing Title TextLabel inside {clone:GetFullName()}`)
 end
 
+local function findItemIcon(root: Instance): ImageLabel?
+	local found = root:FindFirstChild("ItemIcon", true)
+	if found ~= nil and found:IsA("ImageLabel") then
+		return found
+	end
+
+	return nil
+end
+
+local function setItemIcon(imageLabel: ImageLabel?, category: string, itemId: string)
+	if imageLabel == nil then
+		return
+	end
+
+	local iconAssetId = InventoryItemVisuals.GetIconAssetId(category, itemId)
+	if iconAssetId == nil then
+		imageLabel.Image = ""
+		imageLabel.Visible = false
+		return
+	end
+
+	imageLabel.Image = iconAssetId
+	imageLabel.Visible = true
+	imageLabel.Active = false
+	imageLabel.Selectable = false
+	imageLabel.Interactable = false
+end
+
+local function setCloneIcon(clone: Instance, category: string, itemId: string)
+	setItemIcon(findItemIcon(clone), category, itemId)
+end
+
 local function getClickableFromClone(clone: GuiObject): GuiButton?
 	if clone:IsA("GuiButton") then
 		return clone
@@ -1152,9 +1169,7 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 		end
 	end
 
-	if itemImage ~= nil then
-		itemImage.Image = ""
-	end
+	setItemIcon(itemImage, category, itemId)
 
 	if inventoryItemInfo ~= nil then
 		inventoryItemInfo.Visible = true
@@ -1183,6 +1198,7 @@ local function clearSelectedItem()
 
 	if itemImage ~= nil then
 		itemImage.Image = ""
+		itemImage.Visible = false
 	end
 
 	updateSelectedActionButtons()
@@ -1322,6 +1338,7 @@ local function createInventoryItem(row: Frame, category: string, itemId: string,
 	clone.Parent = row
 
 	setCloneTitle(clone, getItemDisplayName(category, itemId))
+	setCloneIcon(clone, category, itemId)
 
 	local equipped = owned and isEquipped(category, itemId)
 	setCloneEquippedVisible(clone, equipped)
