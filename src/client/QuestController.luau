@@ -3,6 +3,7 @@
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Network = Shared:WaitForChild("Network")
@@ -15,6 +16,8 @@ local requestClaimQuestRewardRemote = Remotes.GetClientToServer(Network, Remotes
 local QuestController = {
 	Name = "QuestController",
 }
+
+local DEBUG = false
 
 local QUEST_SCROLLING_FRAME_TAG = "QUEST_SCROLLING_FRAME"
 local QUEST_TIMER_TAG = "QUEST_TIMER"
@@ -48,16 +51,20 @@ local connections: { RBXScriptConnection } = {}
 
 local lastTimerUpdate = 0
 
+local function log(message: string)
+	if DEBUG then
+		print(`[QuestController] {message}`)
+	end
+end
+
 local function getTaggedInstance(tag: string): Instance?
 	for _, instance in CollectionService:GetTagged(tag) do
-		if instance:IsDescendantOf(ReplicatedStorage) then
-			continue
+		if instance:IsDescendantOf(Workspace) then
+			return instance
 		end
-
-		return instance
 	end
 
-	warn(`[QuestController] missing tagged instance: {tag}`)
+	warn(`[QuestController] missing tagged workspace instance: {tag}`)
 	return nil
 end
 
@@ -81,25 +88,69 @@ local function findFrame(parent: Instance, name: string): Frame?
 	return nil
 end
 
-local function setRewardFrameVisible(rewardsFrame: Frame, rewardName: string, visible: boolean)
-	local frame = rewardsFrame:FindFirstChild(rewardName)
+local function findGuiButton(parent: Instance, name: string): GuiButton?
+	local found = parent:FindFirstChild(name, true)
 
-	if frame ~= nil and frame:IsA("GuiObject") then
-		frame.Visible = visible
+	if found ~= nil and found:IsA("GuiButton") then
+		return found
+	end
+
+	return nil
+end
+
+local function setClaimButtonState(claimButton: GuiButton, quest: QuestSnapshotEntry)
+	local shouldShowClaim = quest.completed and not quest.claimed
+
+	claimButton.Visible = shouldShowClaim or quest.claimed
+	claimButton.Active = shouldShowClaim
+	claimButton.Interactable = shouldShowClaim
+	claimButton.AutoButtonColor = shouldShowClaim
+
+	local title = findTextLabel(claimButton, "Title")
+
+	if title ~= nil then
+		if quest.claimed then
+			title.Text = "Claimed"
+		elseif quest.completed then
+			title.Text = "Claim"
+		else
+			title.Text = "Claim"
+		end
 	end
 end
 
-local function setRewardAmount(rewardsFrame: Frame, rewardName: string, amount: number)
-	local frame = rewardsFrame:FindFirstChild(rewardName)
+local function setRewards(rewardsFrame: Frame, quest: QuestSnapshotEntry)
+	local coins = rewardsFrame:FindFirstChild("Coins")
 
-	if frame == nil then
-		return
+	if coins ~= nil and coins:IsA("GuiObject") then
+		coins.Visible = quest.rewardCoins > 0
+
+		local count = findTextLabel(coins, "Count") or findTextLabel(coins, "Amount") or findTextLabel(coins, "Title")
+
+		if count ~= nil then
+			count.Text = tostring(quest.rewardCoins)
+		end
+	else
+		warn(`[QuestController] missing Rewards.Coins inside {rewardsFrame:GetFullName()}`)
 	end
 
-	local count = findTextLabel(frame, "Count") or findTextLabel(frame, "Amount")
+	local claimButton = findGuiButton(rewardsFrame, "Claim")
 
-	if count ~= nil then
-		count.Text = tostring(amount)
+	if claimButton ~= nil then
+		setClaimButtonState(claimButton, quest)
+
+		table.insert(
+			connections,
+			claimButton.Activated:Connect(function()
+				if quest.completed and not quest.claimed then
+					requestClaimQuestRewardRemote:FireServer({
+						questId = quest.questId,
+					})
+				end
+			end)
+		)
+	else
+		warn(`[QuestController] missing Rewards.Claim button inside {rewardsFrame:GetFullName()}`)
 	end
 end
 
@@ -128,25 +179,6 @@ local function updateCanvasSize()
 
 	if layout ~= nil then
 		questScrollingFrame.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y)
-	end
-end
-
-local function connectClaimButton(clone: Frame, quest: QuestSnapshotEntry)
-	local claimButton = clone:FindFirstChild("ClaimButton", true)
-
-	if claimButton ~= nil and claimButton:IsA("GuiButton") then
-		claimButton.Visible = quest.completed and not quest.claimed
-
-		table.insert(
-			connections,
-			claimButton.Activated:Connect(function()
-				if quest.completed and not quest.claimed then
-					requestClaimQuestRewardRemote:FireServer({
-						questId = quest.questId,
-					})
-				end
-			end)
-		)
 	end
 end
 
@@ -191,15 +223,10 @@ local function renderQuest(quest: QuestSnapshotEntry, layoutOrder: number)
 	end
 
 	if rewards ~= nil and rewards:IsA("Frame") then
-		setRewardFrameVisible(rewards, "Coins", quest.rewardCoins > 0)
-		setRewardFrameVisible(rewards, "Gems", false)
-
-		if quest.rewardCoins > 0 then
-			setRewardAmount(rewards, "Coins", quest.rewardCoins)
-		end
+		setRewards(rewards, quest)
+	else
+		warn(`[QuestController] missing Rewards frame inside {clone:GetFullName()}`)
 	end
-
-	connectClaimButton(clone, quest)
 end
 
 local function renderQuests()
@@ -256,6 +283,12 @@ function QuestController:GetReferences()
 	questTimer = getTaggedInstance(QUEST_TIMER_TAG) :: TextLabel?
 
 	if questScrollingFrame ~= nil then
+		if not questScrollingFrame:IsA("ScrollingFrame") then
+			warn(`[QuestController] QUEST_SCROLLING_FRAME is not ScrollingFrame, got {questScrollingFrame.ClassName}`)
+			questScrollingFrame = nil
+			return
+		end
+
 		local foundTemplate = questScrollingFrame:FindFirstChild(TEMPLATE_NAME)
 
 		if foundTemplate ~= nil and foundTemplate:IsA("Frame") then
@@ -264,6 +297,11 @@ function QuestController:GetReferences()
 		else
 			warn(`[QuestController] missing {TEMPLATE_NAME} inside QUEST_SCROLLING_FRAME`)
 		end
+	end
+
+	if questTimer ~= nil and not questTimer:IsA("TextLabel") then
+		warn(`[QuestController] QUEST_TIMER is not TextLabel, got {questTimer.ClassName}`)
+		questTimer = nil
 	end
 end
 
@@ -283,7 +321,6 @@ function QuestController:Start()
 	end
 
 	self._didStart = true
-
 	self:GetReferences()
 
 	table.insert(
