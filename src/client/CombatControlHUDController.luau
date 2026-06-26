@@ -47,12 +47,15 @@ local connections: { any } = {}
 local didBuildUI = false
 local isAttackHolding = false
 
+local activeMobileActionByInput: { [InputObject]: GuiButton? } = {}
 local cooldownEndsAtByName: { [string]: number } = {}
 local previousCooldownsByName: { [string]: number } = {}
 local buttonScales: { [GuiButton]: UIScale? } = {}
 local activeTweens: { [GuiButton]: Tween? } = {}
 local readyFlashesByButton: { [GuiButton]: Frame? } = {}
 local buttonVisualDefaultsByButton: { [GuiButton]: { [Instance]: ButtonVisualDefault } } = {}
+local defaultJumpButtonHiddenConnection: RBXScriptConnection?
+local defaultJumpButtonListenerActive = false
 
 local PRESS_SCALE = 0.9
 local RELEASE_SCALE = 1
@@ -102,8 +105,9 @@ local function setButtonEnabled(button: GuiButton?, enabled: boolean)
 	if button == nil then
 		return
 	end
-	button.Active = true
-	button.AutoButtonColor = enabled
+	if button.Interactable then
+		button.AutoButtonColor = enabled
+	end
 end
 
 local function preventGuiResetOnSpawn(instance: Instance?)
@@ -462,8 +466,68 @@ local function hideOldMobileControls()
 	end
 end
 
+local function hideDefaultJumpButton()
+	if defaultJumpButtonHiddenConnection ~= nil then
+		return
+	end
+
+	local function tryHide(): boolean
+		local touchGui = playerGui:FindFirstChild("TouchGui")
+		if touchGui == nil then
+			return false
+		end
+
+		local controlFrame = touchGui:FindFirstChild("TouchControlFrame")
+		if controlFrame == nil then
+			return false
+		end
+
+		local robloxJumpButton = controlFrame:FindFirstChild("JumpButton")
+		if robloxJumpButton == nil or not robloxJumpButton:IsA("GuiObject") then
+			return false
+		end
+
+		robloxJumpButton.Visible = false
+
+		defaultJumpButtonHiddenConnection = robloxJumpButton:GetPropertyChangedSignal("Visible"):Connect(function()
+			if robloxJumpButton.Visible then
+				robloxJumpButton.Visible = false
+			end
+		end)
+		table.insert(connections, defaultJumpButtonHiddenConnection :: RBXScriptConnection)
+
+		return true
+	end
+
+	if tryHide() then
+		return
+	end
+
+	if defaultJumpButtonListenerActive then
+		return
+	end
+
+	defaultJumpButtonListenerActive = true
+
+	local listenerConnection: RBXScriptConnection? = nil
+	listenerConnection = playerGui.DescendantAdded:Connect(function(descendant)
+		if descendant.Name ~= "JumpButton" then
+			return
+		end
+
+		if tryHide() and listenerConnection ~= nil then
+			listenerConnection:Disconnect()
+			listenerConnection = nil
+			defaultJumpButtonListenerActive = false
+		end
+	end)
+
+	table.insert(connections, listenerConnection :: RBXScriptConnection)
+end
+
 local function refreshLayout()
 	hideOldMobileControls()
+	hideDefaultJumpButton()
 
 	local mobile = isMobile()
 	local roundRunning = isRoundRunning()
@@ -551,18 +615,17 @@ local function pressAttack(context: any)
 	if not isRoundRunning() then
 		return
 	end
-	if getSecondsRemaining("Fireball") > 0.05 then
-		return
-	end
-
-	isAttackHolding = true
 	tweenButton(mobileAttackButton, PRESS_SCALE)
 	tweenButton(pcAttackButton, PRESS_SCALE)
+
+	isAttackHolding = true
 	emitInputAction(context, "FireballPressed")
 end
 
 local function releaseAttack(context: any)
 	if not isAttackHolding then
+		tweenButton(mobileAttackButton, RELEASE_SCALE)
+		tweenButton(pcAttackButton, RELEASE_SCALE)
 		return
 	end
 
@@ -570,6 +633,49 @@ local function releaseAttack(context: any)
 	tweenButton(mobileAttackButton, RELEASE_SCALE)
 	tweenButton(pcAttackButton, RELEASE_SCALE)
 	emitInputAction(context, "FireballReleased")
+end
+
+local function getInputScreenPosition(input: InputObject): Vector2
+	return Vector2.new(input.Position.X, input.Position.Y)
+end
+
+local function isActionInput(input: InputObject): boolean
+	return input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1
+end
+
+local function isScreenPositionInsideButton(button: GuiButton?, screenPosition: Vector2): boolean
+	if button == nil or not button.Visible then
+		return false
+	end
+
+	local absolutePosition = button.AbsolutePosition
+	local absoluteSize = button.AbsoluteSize
+	return screenPosition.X >= absolutePosition.X
+		and screenPosition.X <= absolutePosition.X + absoluteSize.X
+		and screenPosition.Y >= absolutePosition.Y
+		and screenPosition.Y <= absolutePosition.Y + absoluteSize.Y
+end
+
+local function getMobileActionButtonAtPosition(screenPosition: Vector2): GuiButton?
+	if not isMobile() then
+		return nil
+	end
+
+	if mobileAbilities == nil or not mobileAbilities.Visible then
+		return nil
+	end
+
+	if isScreenPositionInsideButton(mobileAttackButton, screenPosition) then
+		return mobileAttackButton
+	end
+	if isScreenPositionInsideButton(mobileAbilityButton, screenPosition) then
+		return mobileAbilityButton
+	end
+	if isScreenPositionInsideButton(jumpButton, screenPosition) then
+		return jumpButton
+	end
+
+	return nil
 end
 
 local function requestExtraAbility(context: any)
@@ -658,6 +764,60 @@ local function requestJump(context: any)
 	if humanoid ~= nil then
 		humanoid.Jump = true
 	end
+end
+
+local function handleMobileActionBegan(context: any, input: InputObject)
+	if not isActionInput(input) then
+		return
+	end
+
+	local button = getMobileActionButtonAtPosition(getInputScreenPosition(input))
+	if button == nil then
+		return
+	end
+
+	activeMobileActionByInput[input] = button
+
+	if mobileAttackButton ~= nil and button == mobileAttackButton then
+		pressAttack(context)
+	elseif mobileAbilityButton ~= nil and button == mobileAbilityButton then
+		requestExtraAbility(context)
+	elseif jumpButton ~= nil and button == jumpButton then
+		requestJump(context)
+	end
+end
+
+local function handleMobileActionEnded(context: any, input: InputObject)
+	local button = activeMobileActionByInput[input]
+	if button == nil then
+		return
+	end
+
+	activeMobileActionByInput[input] = nil
+
+	if mobileAttackButton ~= nil and button == mobileAttackButton then
+		releaseAttack(context)
+	elseif
+		(mobileAbilityButton ~= nil and button == mobileAbilityButton) or (jumpButton ~= nil and button == jumpButton)
+	then
+		tweenButton(button, RELEASE_SCALE)
+	end
+end
+
+local function bindMobileActionInput(context: any)
+	table.insert(
+		connections,
+		UserInputService.InputBegan:Connect(function(input: InputObject)
+			handleMobileActionBegan(context, input)
+		end)
+	)
+
+	table.insert(
+		connections,
+		UserInputService.InputEnded:Connect(function(input: InputObject)
+			handleMobileActionEnded(context, input)
+		end)
+	)
 end
 
 local function bindClickButton(button: GuiButton?, callback: () -> ())
@@ -823,29 +983,17 @@ function CombatControlHUDController:BuildUI()
 
 	refreshLayout()
 
-	bindHoldButton(mobileAttackButton, function()
-		pressAttack(self._context)
-	end, function()
-		releaseAttack(self._context)
-	end)
-
 	bindHoldButton(pcAttackButton, function()
 		pressAttack(self._context)
 	end, function()
 		releaseAttack(self._context)
 	end)
 
-	bindClickButton(mobileAbilityButton, function()
-		requestExtraAbility(self._context)
-	end)
-
 	bindClickButton(pcAbilityButton, function()
 		requestExtraAbility(self._context)
 	end)
 
-	bindClickButton(jumpButton, function()
-		requestJump(self._context)
-	end)
+	bindMobileActionInput(self._context)
 	bindDeviceInputFeedback(self._context)
 	table.insert(
 		connections,
@@ -870,7 +1018,12 @@ function CombatControlHUDController:BuildUI()
 		connections,
 		localPlayer.CharacterAdded:Connect(function()
 			isAttackHolding = false
+			activeMobileActionByInput = {}
 			task.defer(function()
+				if defaultJumpButtonHiddenConnection ~= nil then
+					defaultJumpButtonHiddenConnection:Disconnect()
+					defaultJumpButtonHiddenConnection = nil
+				end
 				self:GetReferences()
 				refreshLayout()
 			end)
