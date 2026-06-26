@@ -17,7 +17,7 @@ local LEVEL_5_UPGRADE_TEXT_BY_ABILITY_ID = {
 	sprint = "SPRINT: Greatly reduces cooldown.",
 	double_jump = "DOUBLE JUMP: Greatly improves movement control while airborne.",
 	healing_zone = "HEALING ZONE: Unlocks a restorative area that heals allies over time.",
-	ice_wall = "ICE WALL: Unlocks a wall that blocks movement and projectiles.",
+	ice_wall = "ICE WALL: Unlocks a wall that blocks enemies and enemy fireballs.",
 } :: { [string]: string }
 
 local function formatStatNumber(value: number): string
@@ -67,7 +67,7 @@ function InventoryAbilityText.GetEffectDescription(abilityId: string, level: num
 	elseif abilityId == "healing_zone" then
 		return "Create a healing zone that restores health over time."
 	elseif abilityId == "ice_wall" then
-		return "Raise an ice wall that blocks movement and projectiles."
+		return "Raise an ice wall that blocks enemies and enemy fireballs. Your own fireballs pass through it."
 	end
 
 	return "Use this skill to gain a combat advantage."
