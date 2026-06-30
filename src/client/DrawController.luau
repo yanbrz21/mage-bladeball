@@ -16,9 +16,10 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local DrawConfig = require(Config:WaitForChild("DrawConfig"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
 local EventBus = require(Packages.CommonKit.EventBus)
-local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
+local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
+local InventoryItemVisuals = require(Parabellum:WaitForChild("InventoryItemVisuals"))
 
 local HUD_SCREENGUI: ScreenGui?
 
@@ -133,6 +134,7 @@ type RollVisualItem = {
 	itemId: string,
 	displayName: string,
 	rarity: string,
+	iconAssetId: string?,
 }
 
 type ResolvedDraw = {
@@ -505,55 +507,11 @@ local function findRobuxDrawProduct(drawId: string, count: number): RobuxDrawPro
 end
 
 local function getInventoryDisplayName(category: string, itemId: string): string
-	local categories = InventoryConfig.Categories :: any
-	local categoryConfig = categories[category]
-
-	if type(categoryConfig) ~= "table" then
-		return itemId
-	end
-
-	local items = categoryConfig.Items
-	if type(items) ~= "table" then
-		return itemId
-	end
-
-	local itemConfig = items[itemId]
-	if type(itemConfig) ~= "table" then
-		return itemId
-	end
-
-	local displayName = itemConfig.DisplayName
-	if type(displayName) ~= "string" then
-		return itemId
-	end
-
-	return displayName
+	return InventoryItemVisuals.GetDisplayName(category, itemId)
 end
 
 local function getInventoryRarity(category: string, itemId: string): string
-	local categories = InventoryConfig.Categories :: any
-	local categoryConfig = categories[category]
-
-	if type(categoryConfig) ~= "table" then
-		return "Common"
-	end
-
-	local items = categoryConfig.Items
-	if type(items) ~= "table" then
-		return "Common"
-	end
-
-	local itemConfig = items[itemId]
-	if type(itemConfig) ~= "table" then
-		return "Common"
-	end
-
-	local rarity = itemConfig.Rarity
-	if type(rarity) ~= "string" or rarity == "" then
-		return "Common"
-	end
-
-	return rarity
+	return InventoryItemVisuals.GetRarity(category, itemId)
 end
 
 local function getRarityColor(rarity: string): Color3
@@ -1360,6 +1318,35 @@ local function findFirstTextLabel(parent: Instance, names: { string }): TextLabe
 	return nil
 end
 
+local function findItemIcon(root: Instance): ImageLabel?
+	local found = root:FindFirstChild("ItemIcon", true)
+	if found ~= nil and found:IsA("ImageLabel") then
+		return found
+	end
+
+	return nil
+end
+
+local function setRollCloneIcon(clone: GuiObject, item: RollVisualItem)
+	local icon = findItemIcon(clone)
+	if icon == nil then
+		return
+	end
+
+	local iconAssetId = item.iconAssetId
+	if iconAssetId == nil then
+		icon.Image = ""
+		icon.Visible = false
+		return
+	end
+
+	icon.Image = iconAssetId
+	icon.Visible = true
+	icon.Active = false
+	icon.Selectable = false
+	icon.Interactable = false
+end
+
 local function setRollCloneInfo(clone: GuiObject, item: RollVisualItem)
 	local titleLabel = findFirstTextLabel(clone, { "Title", "Name", "ItemName" })
 	local rarityLabel = findFirstTextLabel(clone, { "Rarity" })
@@ -1372,6 +1359,8 @@ local function setRollCloneInfo(clone: GuiObject, item: RollVisualItem)
 		rarityLabel.Text = item.rarity
 		rarityLabel.TextColor3 = getRarityColor(item.rarity)
 	end
+
+	setRollCloneIcon(clone, item)
 end
 
 local function createRollClone(item: RollVisualItem, layoutOrder: number): GuiObject?
@@ -1405,6 +1394,7 @@ local function getRollVisualItemFromEntry(entry): RollVisualItem
 		itemId = entry.ItemId,
 		displayName = getInventoryDisplayName(entry.Category, entry.ItemId),
 		rarity = getInventoryRarity(entry.Category, entry.ItemId),
+		iconAssetId = InventoryItemVisuals.GetIconAssetId(entry.Category, entry.ItemId),
 	}
 end
 
@@ -1414,6 +1404,7 @@ local function getRollVisualItemFromReward(reward: SkinDrawRewardPayload): RollV
 		itemId = reward.itemId,
 		displayName = reward.displayName,
 		rarity = reward.rarity,
+		iconAssetId = InventoryItemVisuals.GetIconAssetId(reward.category, reward.itemId),
 	}
 end
 
@@ -1638,8 +1629,8 @@ local function playSingleRoll(
 	token: number,
 	drawConfig,
 	reward: SkinDrawRewardPayload,
-	index: number,
-	total: number
+	_index: number,
+	_total: number
 ): boolean
 	if rollScrollingFrame == nil then
 		return false
