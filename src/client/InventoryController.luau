@@ -1,6 +1,7 @@
 --!strict
 
 local CollectionService = game:GetService("CollectionService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -39,6 +40,7 @@ local CATEGORY_WEAPON_SKIN = "WeaponSkin"
 
 local PAGE_ABILITIES = "Abilities"
 local PAGE_SKINS = "Skins"
+local PAGE_SHOP = "Shop"
 
 local INVENTORY_PART_TAG = "INVENTORY_PART"
 local INVENTORY_PART_MARGIN = 2.5
@@ -46,6 +48,7 @@ local INVENTORY_PART_CHECK_INTERVAL = 0.1
 
 local ITEMS_PER_ROW = 3
 local INVENTORY_CANVAS_BOTTOM_PADDING = 24
+local SHOP_TEMPLATE_RARITY = "Common"
 
 local CLONE_ATTRIBUTE = "IS_CLONE"
 local ROW_CLONE_ATTRIBUTE = "IS_ROW_CLONE"
@@ -60,12 +63,12 @@ local ABILITY_PROGRESS_TEXT_NAME = "Count"
 local ABILITY_LEVEL_BADGE_NAME = "AbilityLevelBadge"
 local ABILITY_LEVEL_TEXT_NAME = "Level"
 
-local SELECTED_PAGE_COLOR = Color3.fromRGB(148, 41, 224)
-local UNSELECTED_PAGE_COLOR = Color3.fromRGB(48, 31, 62)
+local SELECTED_PAGE_COLOR = Color3.fromRGB(255, 221, 64)
+local UNSELECTED_PAGE_COLOR = Color3.fromRGB(255, 221, 64)
 local SELECTED_PAGE_TEXT_COLOR = Color3.fromRGB(255, 255, 255)
-local UNSELECTED_PAGE_TEXT_COLOR = Color3.fromRGB(190, 184, 204)
-local SELECTED_PAGE_STROKE_COLOR = Color3.fromRGB(245, 214, 255)
-local UNSELECTED_PAGE_STROKE_COLOR = Color3.fromRGB(82, 64, 106)
+local UNSELECTED_PAGE_TEXT_COLOR = Color3.fromRGB(255, 255, 255)
+local SELECTED_PAGE_STROKE_COLOR = Color3.fromRGB(255, 246, 170)
+local UNSELECTED_PAGE_STROKE_COLOR = Color3.fromRGB(173, 119, 24)
 local SELECTED_PAGE_BACKGROUND_TRANSPARENCY = 0.08
 local UNSELECTED_PAGE_BACKGROUND_TRANSPARENCY = 0.35
 local SELECTED_PAGE_STROKE_TRANSPARENCY = 0.1
@@ -111,6 +114,20 @@ type InventorySnapshot = {
 	changedAt: number,
 }
 
+type ShopProduct = {
+	kind: string,
+	productKey: string,
+	productId: number,
+	gamePassKey: string?,
+	gamePassId: number?,
+	displayName: string,
+	description: string,
+	rewardText: string,
+	rarity: string,
+	robuxPrice: number?,
+	iconAssetId: string?,
+}
+
 local inventoryScrollFrame: ScrollingFrame?
 local screen: Instance?
 local inventoryItemInfo: GuiObject?
@@ -124,6 +141,7 @@ local inventoryButton: GuiButton?
 
 local abilitiesButton: TextButton?
 local skinsButton: TextButton?
+local shopButton: TextButton?
 local HUD_SCREENGUI: ScreenGui?
 
 local ownedRowTemplate: Frame?
@@ -135,6 +153,7 @@ local currentInventorySnapshot: InventorySnapshot?
 local selectedCategory: string?
 local selectedItemId: string?
 local selectedItemOwned = false
+local selectedShopProductKey: string?
 local currentPage = PAGE_ABILITIES
 
 local lastInventoryPartCheck = 0
@@ -147,6 +166,9 @@ local inventoryChangedEvent = Instance.new("BindableEvent")
 
 local getItemRarity: (category: string, itemId: string) -> string
 local refreshScreenReferences: () -> ()
+local clearSelectedItem: () -> ()
+local updateSelectedActionButtons: () -> ()
+local ShopProducts = {}
 
 local function getReferenceByTag(tag: string, timeout: number?): Instance?
 	local startedAt = os.clock()
@@ -610,6 +632,268 @@ local function getDefaultItemId(category: string): string?
 	return categoryConfig.DefaultItemId
 end
 
+do
+	local gamePassPriceCache: { [string]: number } = {}
+	local gamePassPriceRequests: { [string]: boolean } = {}
+	local shopProductRarityByKey = {
+		coins_medium = "Rare",
+		coins_large = "Epic",
+		coins_huge = "Legendary",
+		["gamepass:double_coins"] = "Legendary",
+	}
+
+	local function getShopRarity(productKey: string, productConfig: any): string
+		local rarity = productConfig.Rarity
+		if type(rarity) == "string" and rarity ~= "" then
+			return rarity
+		end
+
+		return shopProductRarityByKey[productKey] or SHOP_TEMPLATE_RARITY
+	end
+
+	local function normalizeShopProduct(productKey: string, productConfig: any): ShopProduct?
+		if type(productConfig) ~= "table" then
+			warn(`[InventoryController] Robux shop product {productKey} must be a table.`)
+			return nil
+		end
+
+		local productId = productConfig.ProductId
+		if type(productId) ~= "number" or productId < 0 or math.floor(productId) ~= productId then
+			warn(`[InventoryController] Robux shop product {productKey} has invalid ProductId.`)
+			return nil
+		end
+
+		local displayName = productConfig.DisplayName
+		if type(displayName) ~= "string" or displayName == "" then
+			warn(`[InventoryController] Robux shop product {productKey} is missing DisplayName.`)
+			return nil
+		end
+
+		local description = productConfig.Description
+		if type(description) ~= "string" then
+			warn(`[InventoryController] Robux shop product {productKey} has invalid Description.`)
+			return nil
+		end
+
+		local rewardText = productConfig.RewardText
+		if type(rewardText) ~= "string" or rewardText == "" then
+			warn(`[InventoryController] Robux shop product {productKey} is missing RewardText.`)
+			return nil
+		end
+
+		local robuxPrice = productConfig.RobuxPrice
+		if type(robuxPrice) ~= "number" or robuxPrice < 0 then
+			warn(`[InventoryController] Robux shop product {productKey} has invalid RobuxPrice.`)
+			return nil
+		end
+
+		local iconAssetId = productConfig.IconAssetId
+		if iconAssetId ~= nil and type(iconAssetId) ~= "string" then
+			warn(`[InventoryController] Robux shop product {productKey} has invalid IconAssetId.`)
+			return nil
+		end
+
+		return {
+			kind = "DeveloperProduct",
+			productKey = productKey,
+			productId = productId,
+			gamePassKey = nil,
+			gamePassId = nil,
+			displayName = displayName,
+			description = description,
+			rewardText = rewardText,
+			rarity = getShopRarity(productKey, productConfig),
+			robuxPrice = math.floor(robuxPrice),
+			iconAssetId = iconAssetId,
+		}
+	end
+
+	local function formatGamePassRewardText(gamePassConfig: any): string
+		local multiplier = gamePassConfig.Multiplier
+		if type(multiplier) == "number" and multiplier > 1 then
+			return `{multiplier}X coins`
+		end
+
+		return "GamePass"
+	end
+
+	local function formatGamePassDescription(gamePassConfig: any): string
+		if type(gamePassConfig.Multiplier) == "number" and gamePassConfig.Multiplier > 1 then
+			return ""
+		end
+
+		local appliesTo = gamePassConfig.AppliesTo
+		if type(appliesTo) ~= "table" then
+			return "Unlocks a persistent account benefit."
+		end
+
+		local sourceNames = {}
+		for source, enabled in appliesTo do
+			if type(source) == "string" and enabled == true then
+				table.insert(sourceNames, source)
+			end
+		end
+
+		table.sort(sourceNames)
+		if #sourceNames <= 0 then
+			return "Unlocks a persistent account benefit."
+		end
+
+		return `Applies to: {table.concat(sourceNames, ", ")}.`
+	end
+
+	local function normalizeGamePassProduct(gamePassKey: string, gamePassConfig: any): ShopProduct?
+		if type(gamePassConfig) ~= "table" then
+			warn(`[InventoryController] GamePass product {gamePassKey} must be a table.`)
+			return nil
+		end
+
+		local gamePassId = gamePassConfig.GamePassId
+		if type(gamePassId) ~= "number" or gamePassId < 0 or math.floor(gamePassId) ~= gamePassId then
+			warn(`[InventoryController] GamePass product {gamePassKey} has invalid GamePassId.`)
+			return nil
+		end
+
+		local displayName = gamePassConfig.DisplayName
+		if type(displayName) ~= "string" or displayName == "" then
+			warn(`[InventoryController] GamePass product {gamePassKey} is missing DisplayName.`)
+			return nil
+		end
+
+		local iconAssetId = gamePassConfig.IconAssetId
+		if iconAssetId ~= nil and type(iconAssetId) ~= "string" then
+			warn(`[InventoryController] GamePass product {gamePassKey} has invalid IconAssetId.`)
+			return nil
+		end
+
+		return {
+			kind = "GamePass",
+			productKey = `gamepass:{gamePassKey}`,
+			productId = 0,
+			gamePassKey = gamePassKey,
+			gamePassId = gamePassId,
+			displayName = displayName,
+			description = formatGamePassDescription(gamePassConfig),
+			rewardText = formatGamePassRewardText(gamePassConfig),
+			rarity = getShopRarity(`gamepass:{gamePassKey}`, gamePassConfig),
+			robuxPrice = gamePassPriceCache[gamePassKey],
+			iconAssetId = iconAssetId,
+		}
+	end
+
+	local function getShopProduct(productKey: string): ShopProduct?
+		local catalog = (EconomyConfig :: any).RobuxShopCatalog
+		if type(catalog) ~= "table" then
+			warn("[InventoryController] EconomyConfig.RobuxShopCatalog must be configured.")
+			return nil
+		end
+
+		return normalizeShopProduct(productKey, catalog[productKey])
+	end
+
+	local function getGamePassProduct(gamePassKey: string): ShopProduct?
+		local catalog = (EconomyConfig :: any).GamePassCatalog
+		if type(catalog) ~= "table" then
+			warn("[InventoryController] EconomyConfig.GamePassCatalog must be configured.")
+			return nil
+		end
+
+		return normalizeGamePassProduct(gamePassKey, catalog[gamePassKey])
+	end
+
+	function ShopProducts.GetEntry(productKey: string): ShopProduct?
+		if string.sub(productKey, 1, 9) == "gamepass:" then
+			return getGamePassProduct(string.sub(productKey, 10))
+		end
+
+		return getShopProduct(productKey)
+	end
+
+	function ShopProducts.RequestGamePassPrice(gamePassKey: string, gamePassId: number)
+		if gamePassId <= 0 or gamePassPriceCache[gamePassKey] ~= nil or gamePassPriceRequests[gamePassKey] == true then
+			return
+		end
+
+		gamePassPriceRequests[gamePassKey] = true
+		task.spawn(function()
+			local ok, productInfo =
+				pcall(MarketplaceService.GetProductInfoAsync, MarketplaceService, gamePassId, Enum.InfoType.GamePass)
+			gamePassPriceRequests[gamePassKey] = nil
+
+			if not ok or type(productInfo) ~= "table" then
+				warn(
+					`[InventoryController] failed to load GamePass product info for {gamePassKey}: {tostring(
+						productInfo
+					)}`
+				)
+				return
+			end
+
+			local price = productInfo.PriceInRobux
+			if type(price) ~= "number" or price < 0 then
+				return
+			end
+
+			gamePassPriceCache[gamePassKey] = math.floor(price)
+			if currentPage == PAGE_SHOP and selectedShopProductKey == `gamepass:{gamePassKey}` then
+				updateSelectedActionButtons()
+			end
+		end)
+	end
+
+	function ShopProducts.GetProducts(): { ShopProduct }
+		local order = (EconomyConfig :: any).RobuxShopOrder
+		if type(order) ~= "table" then
+			warn("[InventoryController] EconomyConfig.RobuxShopOrder must be configured.")
+			return {}
+		end
+
+		local products = {} :: { ShopProduct }
+		local gamePassCatalog = (EconomyConfig :: any).GamePassCatalog
+		if type(gamePassCatalog) == "table" then
+			local gamePassProducts = {} :: { ShopProduct }
+			for gamePassKey, _gamePassConfig in gamePassCatalog do
+				if type(gamePassKey) ~= "string" or gamePassKey == "" then
+					warn("[InventoryController] GamePassCatalog contains an invalid key.")
+					continue
+				end
+
+				local product = getGamePassProduct(gamePassKey)
+				if product ~= nil then
+					table.insert(gamePassProducts, product)
+					if product.gamePassId ~= nil then
+						ShopProducts.RequestGamePassPrice(gamePassKey, product.gamePassId)
+					end
+				end
+			end
+
+			table.sort(gamePassProducts, function(a, b)
+				return a.displayName < b.displayName
+			end)
+
+			for _, product in gamePassProducts do
+				table.insert(products, product)
+			end
+		elseif gamePassCatalog ~= nil then
+			warn("[InventoryController] EconomyConfig.GamePassCatalog must be a table when configured.")
+		end
+
+		for _, productKey in order do
+			if type(productKey) ~= "string" or productKey == "" then
+				warn("[InventoryController] RobuxShopOrder contains an invalid product key.")
+				continue
+			end
+
+			local product = getShopProduct(productKey)
+			if product ~= nil then
+				table.insert(products, product)
+			end
+		end
+
+		return products
+	end
+end
+
 getItemRarity = function(category: string, itemId: string): string
 	return InventoryItemVisuals.GetRarity(category, itemId)
 end
@@ -933,12 +1217,11 @@ local function findItemIcon(root: Instance): ImageLabel?
 	return nil
 end
 
-local function setItemIcon(imageLabel: ImageLabel?, category: string, itemId: string)
+local function setImageAsset(imageLabel: ImageLabel?, iconAssetId: string?)
 	if imageLabel == nil then
 		return
 	end
 
-	local iconAssetId = InventoryItemVisuals.GetIconAssetId(category, itemId)
 	if iconAssetId == nil then
 		imageLabel.Image = ""
 		imageLabel.Visible = false
@@ -950,6 +1233,10 @@ local function setItemIcon(imageLabel: ImageLabel?, category: string, itemId: st
 	imageLabel.Active = false
 	imageLabel.Selectable = false
 	imageLabel.Interactable = false
+end
+
+local function setItemIcon(imageLabel: ImageLabel?, category: string, itemId: string)
+	setImageAsset(imageLabel, InventoryItemVisuals.GetIconAssetId(category, itemId))
 end
 
 local function setCloneIcon(clone: Instance, category: string, itemId: string)
@@ -1013,10 +1300,24 @@ end
 local function updatePageButtonsVisual()
 	applyPageButtonVisual(abilitiesButton, currentPage == PAGE_ABILITIES)
 	applyPageButtonVisual(skinsButton, currentPage == PAGE_SKINS)
+	applyPageButtonVisual(shopButton, currentPage == PAGE_SHOP)
 end
 
 local function updateEquipButton()
 	if itemEquipButton == nil then
+		return
+	end
+
+	if currentPage == PAGE_SHOP then
+		local product = if selectedShopProductKey ~= nil then ShopProducts.GetEntry(selectedShopProductKey) else nil
+		if product == nil then
+			setEquipButtonText("BUY")
+			setEquipButtonEnabled(false)
+			return
+		end
+
+		setEquipButtonText(if product.robuxPrice ~= nil then `R$ {product.robuxPrice}` else "BUY")
+		setEquipButtonEnabled(product.productId > 0 or (product.gamePassId ~= nil and product.gamePassId > 0))
 		return
 	end
 
@@ -1050,7 +1351,10 @@ local function updateUpgradeButton()
 		return
 	end
 
-	local shouldShow = selectedCategory == CATEGORY_ABILITY and selectedItemId ~= nil and selectedItemOwned
+	local shouldShow = currentPage ~= PAGE_SHOP
+		and selectedCategory == CATEGORY_ABILITY
+		and selectedItemId ~= nil
+		and selectedItemOwned
 	abilityUpgradeButton.Visible = shouldShow
 	abilityUpgradeButton.Size = if shouldShow then ACTION_BUTTON_SIZE else HIDDEN_ACTION_BUTTON_SIZE
 
@@ -1076,7 +1380,7 @@ local function updateUpgradeButton()
 	setUpgradeButtonEnabled(fragments >= cost)
 end
 
-local function updateSelectedActionButtons()
+updateSelectedActionButtons = function()
 	updateEquipButton()
 	updateUpgradeButton()
 end
@@ -1152,6 +1456,7 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 	selectedCategory = category
 	selectedItemId = itemId
 	selectedItemOwned = owned
+	selectedShopProductKey = nil
 
 	local displayName = getItemDisplayName(category, itemId)
 	local rarity = getItemRarity(category, itemId)
@@ -1178,10 +1483,43 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 	updateSelectedActionButtons()
 end
 
-local function clearSelectedItem()
+local function selectShopProduct(productKey: string)
 	selectedCategory = nil
 	selectedItemId = nil
 	selectedItemOwned = false
+	selectedShopProductKey = productKey
+	InventoryUpgradeConfirm.Hide()
+
+	local product = ShopProducts.GetEntry(productKey)
+	if product == nil then
+		clearSelectedItem()
+		return
+	end
+
+	if itemName ~= nil then
+		itemName.Text = product.displayName
+	end
+
+	if itemDescription ~= nil then
+		itemDescription.Text = if product.description == ""
+			then product.rewardText
+			else `{product.rewardText}\n{product.description}`
+	end
+
+	setImageAsset(itemImage, product.iconAssetId)
+
+	if inventoryItemInfo ~= nil then
+		inventoryItemInfo.Visible = true
+	end
+
+	updateSelectedActionButtons()
+end
+
+clearSelectedItem = function()
+	selectedCategory = nil
+	selectedItemId = nil
+	selectedItemOwned = false
+	selectedShopProductKey = nil
 	InventoryUpgradeConfirm.Hide()
 
 	if inventoryItemInfo ~= nil then
@@ -1240,6 +1578,42 @@ local function openDrawForItem(category: string, itemId: string)
 end
 
 local function equipSelectedItem()
+	if currentPage == PAGE_SHOP then
+		local product = if selectedShopProductKey ~= nil then ShopProducts.GetEntry(selectedShopProductKey) else nil
+		if product == nil then
+			updateEquipButton()
+			return
+		end
+
+		if product.kind == "GamePass" then
+			local gamePassId = product.gamePassId
+			if gamePassId == nil or gamePassId <= 0 then
+				warn(`[InventoryController] GamePass product {product.productKey} has no GamePassId configured`)
+				updateEquipButton()
+				return
+			end
+
+			local ok, err =
+				pcall(MarketplaceService.PromptGamePassPurchase, MarketplaceService, localPlayer, gamePassId)
+			if not ok then
+				warn(`[InventoryController] failed to prompt GamePass product {product.productKey}: {tostring(err)}`)
+			end
+		else
+			if product.productId <= 0 then
+				warn(`[InventoryController] Robux product {product.productKey} has no ProductId configured`)
+				updateEquipButton()
+				return
+			end
+
+			local ok, err =
+				pcall(MarketplaceService.PromptProductPurchase, MarketplaceService, localPlayer, product.productId)
+			if not ok then
+				warn(`[InventoryController] failed to prompt Robux product {product.productKey}: {tostring(err)}`)
+			end
+		end
+		return
+	end
+
 	if selectedCategory == nil or selectedItemId == nil then
 		return
 	end
@@ -1316,6 +1690,52 @@ local function upgradeSelectedAbility()
 	end
 
 	showUpgradeConfirmation(selectedItemId)
+end
+
+local function setOptionalGuiObjectVisible(root: Instance, name: string, visible: boolean)
+	local found = root:FindFirstChild(name, true)
+	if found ~= nil and found:IsA("GuiObject") then
+		found.Visible = visible
+	end
+end
+
+local function createShopProductItem(row: Frame, product: ShopProduct, layoutOrder: number)
+	local template = findRarityTemplate(product.rarity)
+
+	if template == nil then
+		return
+	end
+
+	local clone = template:Clone()
+	clone.Name = `Shop_{product.productKey}`
+	clone.Visible = true
+	clone.LayoutOrder = layoutOrder
+	clone:SetAttribute(CLONE_ATTRIBUTE, true)
+	clone:SetAttribute(CATEGORY_ATTRIBUTE, PAGE_SHOP)
+	clone:SetAttribute(ITEM_ID_ATTRIBUTE, product.productKey)
+	clone:SetAttribute(RARITY_ATTRIBUTE, product.rarity)
+	clone:SetAttribute(OWNED_ATTRIBUTE, false)
+	clone.Parent = row
+
+	setCloneTitle(clone, product.displayName)
+	setImageAsset(findItemIcon(clone), product.iconAssetId)
+	setCloneEquippedVisible(clone, false)
+	setOptionalGuiObjectVisible(clone, ABILITY_LEVEL_BADGE_NAME, false)
+	setOptionalGuiObjectVisible(clone, ABILITY_PROGRESS_NAME, false)
+
+	local clickable = getClickableFromClone(clone)
+
+	if clickable == nil then
+		warn(`[InventoryController] shop product clone has no GuiButton: {clone:GetFullName()}`)
+		return
+	end
+
+	table.insert(
+		connections,
+		clickable.Activated:Connect(function()
+			selectShopProduct(product.productKey)
+		end)
+	)
 end
 
 local function createInventoryItem(row: Frame, category: string, itemId: string, owned: boolean, layoutOrder: number)
@@ -1420,9 +1840,55 @@ local function renderItemsInRows(
 	end
 end
 
+local function renderShopProducts()
+	local products = ShopProducts.GetProducts()
+
+	if unownedTitle ~= nil then
+		unownedTitle.Visible = false
+	end
+
+	if unownedRowTemplate ~= nil then
+		unownedRowTemplate.Visible = false
+		clearRowItemClones(unownedRowTemplate)
+	end
+
+	if #products <= 0 then
+		if ownedRowTemplate ~= nil then
+			ownedRowTemplate.Visible = false
+			clearRowItemClones(ownedRowTemplate)
+		end
+		return
+	end
+
+	local rowIndex = 1
+	local itemIndexInRow = 0
+	local currentRow = getOrCreateRow(ownedRowTemplate, "Shop", rowIndex, 1)
+
+	for _, product in products do
+		itemIndexInRow += 1
+
+		if itemIndexInRow > ITEMS_PER_ROW then
+			rowIndex += 1
+			itemIndexInRow = 1
+			currentRow = getOrCreateRow(ownedRowTemplate, "Shop", rowIndex, rowIndex)
+		end
+
+		if currentRow ~= nil then
+			createShopProductItem(currentRow, product, itemIndexInRow)
+		end
+	end
+end
+
 function InventoryController:RenderInventory()
 	clearGeneratedRows()
 	updatePageButtonsVisual()
+
+	if currentPage == PAGE_SHOP then
+		renderShopProducts()
+		updateSelectedActionButtons()
+		scheduleInventoryCanvasSizeUpdate()
+		return
+	end
 
 	local category = getCurrentPageCategory()
 	local ownedItems = getOwnedItems(category)
@@ -1444,7 +1910,7 @@ end
 local function setCurrentPage(page: string)
 	print(`[InventoryController] set page: {page}`)
 
-	if page ~= PAGE_ABILITIES and page ~= PAGE_SKINS then
+	if page ~= PAGE_ABILITIES and page ~= PAGE_SKINS and page ~= PAGE_SHOP then
 		warn(`[InventoryController] invalid page: {page}`)
 		return
 	end
@@ -1513,6 +1979,7 @@ function InventoryController:GetReferences()
 	inventoryButton = nil
 	abilitiesButton = nil
 	skinsButton = nil
+	shopButton = nil
 	HUD_SCREENGUI = nil
 	ownedRowTemplate = nil
 	unownedRowTemplate = nil
@@ -1536,11 +2003,15 @@ function InventoryController:GetReferences()
 
 	abilitiesButton = getReferenceByTag("INVENTORY_ABILITIES_BUTTON") :: TextButton?
 	skinsButton = getReferenceByTag("INVENTORY_SKINS_BUTTON") :: TextButton?
+	shopButton = getOptionalReferenceByTag("INVENTORY_SHOP_BUTTON") :: TextButton?
 	if abilitiesButton ~= nil then
 		abilitiesButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
 	end
 	if skinsButton ~= nil then
 		skinsButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
+	end
+	if shopButton ~= nil then
+		shopButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
 	end
 
 	if inventoryScrollFrame ~= nil then
@@ -1628,6 +2099,17 @@ function InventoryController:ConnectScreenControls()
 			end)
 		)
 	end
+
+	if shopButton ~= nil and shopButton:GetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE) ~= true then
+		shopButton:SetAttribute(INVENTORY_PAGE_CONNECTED_ATTRIBUTE, true)
+		table.insert(
+			connections,
+			shopButton.Activated:Connect(function()
+				print("[InventoryController] shop page clicked")
+				setCurrentPage(PAGE_SHOP)
+			end)
+		)
+	end
 end
 
 refreshScreenReferences = function()
@@ -1687,6 +2169,10 @@ function InventoryController:BuildScreen()
 		print("[InventoryController] skins button connected")
 	else
 		warn("[InventoryController] skins button not found")
+	end
+
+	if shopButton ~= nil then
+		print("[InventoryController] shop button connected")
 	end
 
 	table.insert(
@@ -1821,7 +2307,7 @@ function InventoryController:Open()
 	setScreenVisible(true)
 	setHudVisible(false)
 
-	if currentPage ~= PAGE_ABILITIES and currentPage ~= PAGE_SKINS then
+	if currentPage ~= PAGE_ABILITIES and currentPage ~= PAGE_SKINS and currentPage ~= PAGE_SHOP then
 		currentPage = PAGE_ABILITIES
 	end
 
