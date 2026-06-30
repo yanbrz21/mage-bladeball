@@ -10,11 +10,7 @@ local CONTROLLER_NAMES = table.freeze({
 	"DrawController",
 	"InventoryController",
 	"QuestController",
-<<<<<<< Updated upstream
 	"CombatControlHUDController",
-=======
-	"AbilityController"
->>>>>>> Stashed changes
 })
 
 type Controller = {
