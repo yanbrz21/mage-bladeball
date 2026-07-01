@@ -1,24 +1,27 @@
 --!strict
 
 local CollectionService = game:GetService("CollectionService")
-local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
-local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 local Network = Shared:WaitForChild("Network")
-local Packages = ReplicatedStorage:WaitForChild("Packages")
 
 local DrawConfig = require(Config:WaitForChild("DrawConfig"))
 local EconomyConfig = require(Config:WaitForChild("EconomyConfig"))
-local EventBus = require(Packages.CommonKit.EventBus)
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
 local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
+local DrawCatalogUtils = require(Parabellum:WaitForChild("DrawCatalogUtils"))
+local DrawHighlightListView = require(Parabellum:WaitForChild("DrawHighlightListView"))
+local DrawHighlightPreview = require(Parabellum:WaitForChild("DrawHighlightPreview"))
+local DrawPresentationState = require(Parabellum:WaitForChild("DrawPresentationState"))
+local DrawPricingView = require(Parabellum:WaitForChild("DrawPricingView"))
+local DrawRequestFlow = require(Parabellum:WaitForChild("DrawRequestFlow"))
+local DrawRollSequence = require(Parabellum:WaitForChild("DrawRollSequence"))
+local DrawSpinTypeTabs = require(Parabellum:WaitForChild("DrawSpinTypeTabs"))
 local InventoryItemVisuals = require(Parabellum:WaitForChild("InventoryItemVisuals"))
 
 local HUD_SCREENGUI: ScreenGui?
@@ -36,123 +39,15 @@ local DrawController = {
 }
 
 local DRAW_ID_ATTRIBUTE = "ID"
-local SELECTED_ATTRIBUTE = "SELECTED"
 local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
 local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
 local SPIN_TYPE_CONNECTED_ATTRIBUTE = "ParabellumSpinTypeConnected"
-local DRAW_KIND_COIN = "Coin"
-local DRAW_KIND_ROBUX = "Robux"
-local COIN_PRICE_ICON = "rbxassetid://87190121549893"
-local ROBUX_PRICE_ICON = "rbxassetid://138110852462666"
 
-local ROLL_CLONE_ATTRIBUTE = "IS_ROLL_CLONE"
-local ROLL_TEMPLATE_ATTRIBUTE = "IS_ROLL_TEMPLATE"
-
-local ROLL_LEAD_CARD_COUNT = 48
-local ROLL_TRAIL_CARD_COUNT = 7
-local ROLL_DURATION_SECONDS = 3.25
-local ROLL_RESULT_WAIT_SECONDS = 1.15
-local ROLL_TICK_MIN_DISTANCE_PIXELS = 24
-local ROLL_TICK_MIN_INTERVAL_SECONDS = 0.035
-local LOCAL_DRAW_ROLL_TICK_EVENT = "Client.LocalDrawRollTick"
-local LOCAL_DRAW_ROLL_STOPPED_EVENT = "Client.LocalDrawRollStopped"
-local LOCAL_DRAW_RESULT_REVEALED_EVENT = "Client.LocalDrawResultRevealed"
 local DRAW_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumDrawEntryConnected"
-local HIGHLIGHT_TEMPLATE_FOLDER_NAME = "Template"
-local HIGHLIGHT_ITEM_TEMPLATE_NAME = "HighlightItem"
-local HIGHLIGHT_GRADIENTS_FOLDER_NAME = "Gradients"
-local HIGHLIGHT_ITEM_CLONE_ATTRIBUTE = "ParabellumHighlightItemClone"
 
-local SELECTED_STROKE_COLOR = Color3.fromRGB(193, 134, 251)
-local UNSELECTED_STROKE_COLOR = Color3.fromRGB(38, 38, 38)
-
-local rarityRank = {
-	Common = 1,
-	Rare = 2,
-	Epic = 3,
-	Legendary = 4,
-	Mythic = 5,
-}
-
-local rarityColors = {
-	Common = Color3.fromRGB(178, 183, 205),
-	Rare = Color3.fromRGB(89, 171, 255),
-	Epic = Color3.fromRGB(184, 110, 255),
-	Legendary = Color3.fromRGB(255, 150, 25),
-	Mythic = Color3.fromRGB(255, 70, 97),
-}
-
-local rarityHighlightStyles = {
-	Common = {
-		gradientName = "Blue",
-	},
-	Rare = {
-		gradientName = "Blue",
-	},
-	Epic = {
-		gradientName = "Purple",
-	},
-	Legendary = {
-		gradientName = "Yellow",
-	},
-	Mythic = {
-		gradientName = "Yellow",
-	},
-}
-
-type SkinDrawRewardPayload = {
-	category: string,
-	itemId: string,
-	displayName: string,
-	rarity: string,
-	isNew: boolean,
-	duplicateConversionType: string?,
-	duplicateConversionAmount: number?,
-}
-
-type SkinDrawResultPayload = {
-	success: boolean,
-	code: string,
-	drawId: string,
-	count: number,
-	totalCost: number?,
-	skinTokensAwarded: number?,
-	abilityFragmentsAwarded: number?,
-	balanceBefore: number?,
-	balanceAfter: number?,
-	skinTokensBefore: number?,
-	skinTokensAfter: number?,
-	rewards: { SkinDrawRewardPayload },
-}
-
-type RollVisualItem = {
-	category: string,
-	itemId: string,
-	displayName: string,
-	rarity: string,
-	iconAssetId: string?,
-}
-
-type ResolvedDraw = {
-	drawId: string,
-	kind: string,
-	config: any,
-}
-
-type RobuxDrawProduct = {
-	productKey: string,
-	productId: number,
-	robuxPrice: number,
-	displayName: string,
-	count: number,
-}
-
-type HighlightVisualEntry = {
-	Category: string,
-	ItemId: string,
-	Weight: number?,
-	exclusive: boolean,
-}
+type SkinDrawResultPayload = DrawCatalogUtils.SkinDrawResultPayload
+type ResolvedDraw = DrawCatalogUtils.ResolvedDraw
+type HighlightVisualEntry = DrawCatalogUtils.HighlightVisualEntry
 
 local screen: Instance?
 
@@ -192,13 +87,7 @@ local currentDrawId = ""
 local currentCount = 1
 local currentBalance = 0
 
-local isDrawing = false
-local isRolling = false
-local isWaitingForDrawResult = false
-local isRollFinished = false
-local rollToken = 0
-local rollTween: Tween?
-local latestDrawResult: SkinDrawResultPayload?
+local selectedHighlightKey: string?
 
 local connections: { RBXScriptConnection } = {}
 local didBuildUI = false
@@ -257,6 +146,22 @@ local function setScreenEnabled(enabled: boolean)
 	elseif screen:IsA("GuiObject") then
 		screen.Visible = enabled
 	end
+end
+
+local function isScreenShown(): boolean
+	if screen == nil then
+		return false
+	end
+
+	if screen:IsA("ScreenGui") then
+		return screen.Enabled
+	end
+
+	if screen:IsA("GuiObject") then
+		return screen.Visible
+	end
+
+	return false
 end
 
 local function setGuiVisible(instance: Instance?, visible: boolean)
@@ -368,358 +273,27 @@ local function handleSideMenuAdded(instance: Instance)
 end
 
 local function resolveDraw(drawId: string): ResolvedDraw?
-	local drawCatalog = DrawConfig.DrawCatalog :: any
-	local coinDrawConfig = drawCatalog[drawId]
-
-	if type(coinDrawConfig) == "table" then
-		return {
-			drawId = drawId,
-			kind = DRAW_KIND_COIN,
-			config = coinDrawConfig,
-		}
-	end
-
-	local robuxDrawCatalog = DrawConfig.RobuxDrawCatalog :: any
-	local robuxDrawConfig = robuxDrawCatalog[drawId]
-
-	if type(robuxDrawConfig) == "table" then
-		return {
-			drawId = drawId,
-			kind = DRAW_KIND_ROBUX,
-			config = robuxDrawConfig,
-		}
-	end
-
-	warn(`[DrawController] invalid draw id: {drawId}`)
-	return nil
+	return DrawCatalogUtils.ResolveDraw(DrawConfig, drawId)
 end
 
 local function getDrawConfig(drawId: string)
-	local resolvedDraw = resolveDraw(drawId)
-	return if resolvedDraw ~= nil then resolvedDraw.config else nil
+	return DrawCatalogUtils.GetDrawConfig(DrawConfig, drawId)
 end
 
-local function getDefaultDrawId(): string
-	for _, drawId in DrawConfig.DrawOrder do
-		if type(drawId) == "string" and resolveDraw(drawId) ~= nil then
-			return drawId
-		end
-	end
-
-	return ""
-end
-
-local function findRobuxDrawProduct(drawId: string, count: number): RobuxDrawProduct?
-	local robuxCatalog = EconomyConfig.RobuxShopCatalog :: any
-
-	for productKey, productConfig in robuxCatalog do
-		if type(productKey) ~= "string" or type(productConfig) ~= "table" then
-			continue
-		end
-
-		local reward = productConfig.Reward
-		if type(reward) ~= "table" then
-			continue
-		end
-
-		if reward.Type ~= "RobuxDraw" or reward.DrawId ~= drawId or reward.Count ~= count then
-			continue
-		end
-
-		local productId = productConfig.ProductId
-		local robuxPrice = productConfig.RobuxPrice
-		local displayName = productConfig.DisplayName
-		if type(productId) ~= "number" or type(robuxPrice) ~= "number" or type(displayName) ~= "string" then
-			continue
-		end
-
-		return {
-			productKey = productKey,
-			productId = productId,
-			robuxPrice = robuxPrice,
-			displayName = displayName,
-			count = count,
-		}
-	end
-
-	return nil
-end
-
-local function getInventoryDisplayName(category: string, itemId: string): string
-	return InventoryItemVisuals.GetDisplayName(category, itemId)
-end
-
-local function getInventoryRarity(category: string, itemId: string): string
-	return InventoryItemVisuals.GetRarity(category, itemId)
+local function findRobuxDrawProduct(drawId: string, count: number): DrawCatalogUtils.RobuxDrawProduct?
+	return DrawCatalogUtils.FindRobuxDrawProduct(EconomyConfig, drawId, count)
 end
 
 local function getRarityColor(rarity: string): Color3
-	return rarityColors[rarity] or Color3.fromRGB(167, 157, 194)
-end
-
-local function getBestDrawEntries(drawConfig): { any }
-	local entries = {}
-
-	for _, entry in drawConfig.Entries do
-		table.insert(entries, entry)
-	end
-
-	table.sort(entries, function(a, b)
-		local leftRarity = getInventoryRarity(a.Category, a.ItemId)
-		local rightRarity = getInventoryRarity(b.Category, b.ItemId)
-		local leftRank = rarityRank[leftRarity] or 0
-		local rightRank = rarityRank[rightRarity] or 0
-
-		if leftRank ~= rightRank then
-			return leftRank > rightRank
-		end
-
-		if a.Weight ~= b.Weight then
-			return a.Weight > b.Weight
-		end
-
-		return tostring(a.ItemId) < tostring(b.ItemId)
-	end)
-
-	return entries
-end
-
-local function getAutoHighlightEntries(drawConfig): { HighlightVisualEntry }
-	local entries = {}
-
-	for _, entry in getBestDrawEntries(drawConfig) do
-		table.insert(entries, {
-			Category = entry.Category,
-			ItemId = entry.ItemId,
-			Weight = entry.Weight,
-			exclusive = false,
-		})
-	end
-
-	return entries
-end
-
-local function getHighlightTemplateFolder(): Folder?
-	if spinItems == nil then
-		return nil
-	end
-
-	local templateFolder = spinItems:FindFirstChild(HIGHLIGHT_TEMPLATE_FOLDER_NAME)
-	if templateFolder == nil or not templateFolder:IsA("Folder") then
-		return nil
-	end
-
-	return templateFolder
-end
-
-local function getHighlightItemTemplate(): Frame?
-	local templateFolder = getHighlightTemplateFolder()
-	if templateFolder ~= nil then
-		local template = templateFolder:FindFirstChild(HIGHLIGHT_ITEM_TEMPLATE_NAME)
-		if template ~= nil and template:IsA("Frame") then
-			template.Visible = false
-			return template
-		end
-
-		warn("[DrawController] missing Template.HighlightItem under SPIN_ITEMS")
-	end
-
-	if spinItems == nil then
-		return nil
-	end
-
-	for _, child in spinItems:GetChildren() do
-		if child:IsA("Frame") and child:GetAttribute(HIGHLIGHT_ITEM_CLONE_ATTRIBUTE) ~= true then
-			child.Visible = false
-			return child
-		end
-	end
-
-	warn("[DrawController] no highlight item template found")
-	return nil
-end
-
-local function clearHighlightItemClones()
-	if spinItems == nil then
-		return
-	end
-
-	for _, child in spinItems:GetChildren() do
-		if child:GetAttribute(HIGHLIGHT_ITEM_CLONE_ATTRIBUTE) == true then
-			child:Destroy()
-		elseif child:IsA("Frame") then
-			child.Visible = false
-		end
-	end
-end
-
-local function getHighlightGradientSource(rarity: string): UIGradient?
-	local style = rarityHighlightStyles[rarity]
-	if style == nil then
-		warn(`[DrawController] unsupported highlight rarity style: {rarity}`)
-		style = rarityHighlightStyles.Rare
-	end
-
-	local templateFolder = getHighlightTemplateFolder()
-	if templateFolder == nil then
-		return nil
-	end
-
-	local gradientsFolder = templateFolder:FindFirstChild(HIGHLIGHT_GRADIENTS_FOLDER_NAME)
-	if gradientsFolder == nil or not gradientsFolder:IsA("Folder") then
-		warn("[DrawController] missing Template.Gradients under SPIN_ITEMS")
-		return nil
-	end
-
-	local gradientName = style.gradientName
-	local gradient = gradientsFolder:FindFirstChild(gradientName)
-	if gradient ~= nil and gradient:IsA("UIGradient") then
-		return gradient
-	end
-
-	warn(`[DrawController] missing highlight gradient source: {gradientName}`)
-	return nil
-end
-
-local function applyGradientProperties(target: UIGradient, source: UIGradient)
-	target.Color = source.Color
-	target.Transparency = source.Transparency
-	target.Rotation = source.Rotation
-	target.Offset = source.Offset
-	target.Enabled = source.Enabled
-end
-
-local function applyHighlightRarityStyle(frame: Frame, rarity: string)
-	local deco = frame:FindFirstChild("Deco")
-	if deco == nil then
-		warn(`[DrawController] missing Deco folder inside {frame:GetFullName()}`)
-		return
-	end
-
-	local bg = deco:FindFirstChild("Bg")
-	if bg == nil or not bg:IsA("GuiObject") then
-		warn(`[DrawController] missing Deco.Bg inside {frame:GetFullName()}`)
-		return
-	end
-
-	local gradientSource = getHighlightGradientSource(rarity)
-	if gradientSource == nil then
-		return
-	end
-
-	local targetGradient = bg:FindFirstChildWhichIsA("UIGradient")
-	if targetGradient == nil then
-		local clonedGradient = gradientSource:Clone()
-		clonedGradient.Name = "Gradient"
-		clonedGradient.Parent = bg
-	else
-		applyGradientProperties(targetGradient, gradientSource)
-	end
-end
-
-local function findDrawEntry(drawConfig, category: string, itemId: string): any?
-	for _, entry in drawConfig.Entries do
-		if entry.Category == category and entry.ItemId == itemId then
-			return entry
-		end
-	end
-
-	return nil
-end
-
-local function getHighlightDrawEntries(drawConfig): { HighlightVisualEntry }
-	local highlights = drawConfig.Highlights
-	if type(highlights) ~= "table" or #highlights <= 0 then
-		return getAutoHighlightEntries(drawConfig)
-	end
-
-	local entries = {} :: { HighlightVisualEntry }
-
-	for _, highlight in highlights do
-		if type(highlight) ~= "table" then
-			warn("[DrawController] draw highlight entries must be tables")
-			continue
-		end
-
-		local highlightConfig = highlight :: any
-		local category = highlightConfig.Category
-		local itemId = highlightConfig.ItemId
-		if type(category) ~= "string" or type(itemId) ~= "string" then
-			warn("[DrawController] draw highlight entries need Category and ItemId")
-			continue
-		end
-
-		local entry = findDrawEntry(drawConfig, category, itemId)
-		if entry == nil then
-			warn(`[DrawController] draw highlight item is not in entries: {category}:{itemId}`)
-			continue
-		end
-
-		table.insert(entries, {
-			Category = entry.Category,
-			ItemId = entry.ItemId,
-			Weight = entry.Weight,
-			exclusive = highlightConfig.Exclusive == true,
-		})
-	end
-
-	if #entries <= 0 then
-		return getAutoHighlightEntries(drawConfig)
-	end
-
-	return entries
+	return DrawCatalogUtils.GetRarityColor(rarity)
 end
 
 local function formatPercent(value: number): string
-	if value <= 0 then
-		return "0%"
-	end
-
-	if value >= 10 then
-		return string.format("%.1f%%", value)
-	end
-
-	return string.format("%.2f%%", value)
+	return DrawCatalogUtils.FormatPercent(value)
 end
 
 local function getDrawRarityOdds(drawConfig): { [string]: number }
-	local rarityWeights = {}
-	local totalWeight = 0
-
-	if type(drawConfig.RarityWeights) == "table" then
-		for rarity, weight in drawConfig.RarityWeights do
-			if type(rarity) ~= "string" or typeof(weight) ~= "number" then
-				continue
-			end
-
-			totalWeight += weight
-			rarityWeights[rarity] = (rarityWeights[rarity] or 0) + weight
-		end
-	else
-		for _, entry in drawConfig.Entries do
-			local rarity = getInventoryRarity(entry.Category, entry.ItemId)
-			local weight = entry.Weight
-
-			if type(rarity) ~= "string" or typeof(weight) ~= "number" then
-				continue
-			end
-
-			totalWeight += weight
-			rarityWeights[rarity] = (rarityWeights[rarity] or 0) + weight
-		end
-	end
-
-	local rarityOdds = {}
-
-	if totalWeight <= 0 then
-		return rarityOdds
-	end
-
-	for rarity, weight in rarityWeights do
-		rarityOdds[rarity] = (weight / totalWeight) * 100
-	end
-
-	return rarityOdds
+	return DrawCatalogUtils.GetDrawRarityOdds(InventoryItemVisuals, drawConfig)
 end
 
 local function updateOddsFrame()
@@ -765,90 +339,56 @@ local function updateOddsFrame()
 	end
 end
 
-local function findHighlightTextLabel(root: Instance, name: string): TextLabel?
-	local found = root:FindFirstChild(name, true)
-	if found ~= nil and found:IsA("TextLabel") then
-		return found
-	end
-
-	return nil
+local function clearHighlightPreview()
+	DrawHighlightPreview.Clear()
 end
 
-local function getHighlightInfoLabels(info: Frame): (TextLabel?, TextLabel?, TextLabel?)
-	local titleLabel = findHighlightTextLabel(info, "Title")
-	local badgeInfo = info:FindFirstChild("Info")
-
-	if badgeInfo ~= nil and badgeInfo:IsA("Frame") then
-		local rarityLabel = badgeInfo:FindFirstChild("Rarity")
-		local exclusiveLabel = badgeInfo:FindFirstChild("Exclusive")
-
-		return titleLabel,
-			if rarityLabel ~= nil and rarityLabel:IsA("TextLabel")
-				then rarityLabel
-				else findHighlightTextLabel(info, "Rarity"),
-			if exclusiveLabel ~= nil and exclusiveLabel:IsA("TextLabel")
-				then exclusiveLabel
-				else findHighlightTextLabel(info, "Exclusive")
-	end
-
-	return titleLabel, findHighlightTextLabel(info, "Rarity"), findHighlightTextLabel(info, "Exclusive")
+local function resolveHighlightPreviewReferences()
+	DrawHighlightPreview.ResolveReferences(screen)
 end
 
-local function updateSpinItems()
+local function renderHighlightPreview(category: string, itemId: string)
+	DrawHighlightPreview.Render(category, itemId)
+end
+
+local function renderSelectedHighlightPreview(entry: HighlightVisualEntry?)
+	if entry == nil then
+		selectedHighlightKey = nil
+		clearHighlightPreview()
+		return
+	end
+
+	if not isScreenShown() then
+		clearHighlightPreview()
+		return
+	end
+
+	renderHighlightPreview(entry.Category, entry.ItemId)
+end
+
+local updateSpinItems
+
+local function selectHighlightEntry(entry: HighlightVisualEntry)
+	local highlightKey = DrawHighlightListView.MakeKey(entry.Category, entry.ItemId)
+	if selectedHighlightKey == highlightKey then
+		return
+	end
+
+	selectedHighlightKey = highlightKey
+	updateSpinItems()
+end
+
+function updateSpinItems()
 	local drawConfig = getDrawConfig(currentDrawId)
-	if drawConfig == nil then
-		return
-	end
+	local result = DrawHighlightListView.Render({
+		spinItems = spinItems,
+		drawConfig = drawConfig,
+		selectedKey = selectedHighlightKey,
+		onSelect = selectHighlightEntry,
+	})
 
-	clearHighlightItemClones()
-
-	local template = getHighlightItemTemplate()
-	if template == nil or spinItems == nil then
-		return
-	end
-
-	local highlightEntries = getHighlightDrawEntries(drawConfig)
-
-	for index, entry in highlightEntries do
-		local frame = template:Clone()
-		frame.Name = `HighlightItem_{index}`
-		frame.LayoutOrder = index
-		frame:SetAttribute(HIGHLIGHT_ITEM_CLONE_ATTRIBUTE, true)
-		frame.Parent = spinItems
-
-		local info = frame:FindFirstChild("Info")
-		if info == nil or not info:IsA("Frame") then
-			warn(`[DrawController] missing Info frame inside {frame:GetFullName()}`)
-			frame.Visible = false
-			continue
-		end
-
-		local titleLabel, rarityLabel, exclusiveLabel = getHighlightInfoLabels(info)
-		local rarity = getInventoryRarity(entry.Category, entry.ItemId)
-		applyHighlightRarityStyle(frame, rarity)
-
-		if rarityLabel ~= nil and rarityLabel:IsA("TextLabel") then
-			rarityLabel.Text = rarity
-			rarityLabel.TextColor3 = getRarityColor(rarity)
-		else
-			warn(`[DrawController] missing Info.Rarity TextLabel inside {frame:GetFullName()}`)
-		end
-
-		if titleLabel ~= nil and titleLabel:IsA("TextLabel") then
-			titleLabel.Text = getInventoryDisplayName(entry.Category, entry.ItemId)
-		else
-			warn(`[DrawController] missing Info.Title TextLabel inside {frame:GetFullName()}`)
-		end
-
-		if exclusiveLabel ~= nil and exclusiveLabel:IsA("TextLabel") then
-			exclusiveLabel.Text = "Exclusive!"
-			exclusiveLabel.Visible = entry.exclusive
-		elseif entry.exclusive then
-			warn(`[DrawController] missing Info.Exclusive TextLabel inside {frame:GetFullName()}`)
-		end
-
-		frame.Visible = true
-	end
+	selectedHighlightKey = result.selectedKey
+	renderSelectedHighlightPreview(result.selectedEntry)
 end
 
 local function readBalanceAttribute()
@@ -864,275 +404,48 @@ local function updateCurrencyLabels()
 	end
 end
 
-local function setButtonTitle(button: TextButton?, text: string)
-	if button == nil then
-		return
-	end
-
-	local title = button:FindFirstChild("Title", true)
-	if title ~= nil and title:IsA("TextLabel") then
-		title.Text = text
-	else
-		button.Text = text
-	end
-end
-
-local function setDrawButtonEnabled(button: TextButton?, enabled: boolean)
-	if button == nil then
-		return
-	end
-
-	button.Active = enabled
-	button.Interactable = enabled
-	button.AutoButtonColor = enabled
-	button.BackgroundTransparency = if enabled then 1 else 0.85
-end
-
-local function setPriceIcons(image: string)
-	if price1xIcon ~= nil then
-		price1xIcon.Image = image
-	end
-
-	if price5xIcon ~= nil then
-		price5xIcon.Image = image
-	end
-end
-
-local function isCoinDrawCountAllowed(drawConfig, count: number): boolean
-	local allowedCounts = drawConfig.AllowedCounts
-	if type(allowedCounts) ~= "table" then
-		return false
-	end
-
-	for _, allowedCount in allowedCounts do
-		if allowedCount == count then
-			return true
-		end
-	end
-
-	return false
-end
-
 local function updateDrawPrices()
 	local resolvedDraw = resolveDraw(currentDrawId)
 	if resolvedDraw == nil then
 		return
 	end
 
-	if resolvedDraw.kind == DRAW_KIND_ROBUX then
-		setPriceIcons(ROBUX_PRICE_ICON)
-
-		local product1x = findRobuxDrawProduct(currentDrawId, 1)
-		local product5x = findRobuxDrawProduct(currentDrawId, 5)
-
-		if price1x ~= nil then
-			price1x.Text = if product1x ~= nil then tostring(product1x.robuxPrice) else "--"
-		end
-
-		if price5x ~= nil then
-			price5x.Text = if product5x ~= nil then tostring(product5x.robuxPrice) else "--"
-		end
-
-		if coinsDrawPrice ~= nil then
-			coinsDrawPrice.Text = if product1x ~= nil then tostring(product1x.robuxPrice) else "--"
-		end
-
-		if gemsDrawPrice ~= nil then
-			gemsDrawPrice.Text = if product5x ~= nil then tostring(product5x.robuxPrice) else "--"
-		end
-
-		if spin1xButton ~= nil then
-			spin1xButton.Visible = product1x ~= nil
-			setButtonTitle(spin1xButton, "Buy x1")
-			setDrawButtonEnabled(spin1xButton, product1x ~= nil and product1x.productId > 0)
-		end
-
-		if spin5xButton ~= nil then
-			spin5xButton.Visible = product5x ~= nil
-			setButtonTitle(spin5xButton, "Buy x5")
-			setDrawButtonEnabled(spin5xButton, product5x ~= nil and product5x.productId > 0)
-		end
-
-		return
-	end
-
-	setPriceIcons(COIN_PRICE_ICON)
-
-	local drawConfig = resolvedDraw.config
-	local cost = drawConfig.Cost
-	if type(cost) ~= "number" or cost <= 0 then
-		warn(`[DrawController] coin draw {currentDrawId} has invalid Cost`)
-		setDrawButtonEnabled(spin1xButton, false)
-		setDrawButtonEnabled(spin5xButton, false)
-		return
-	end
-
-	local totalCost = cost * currentCount
-
-	if price1x ~= nil then
-		price1x.Text = if isCoinDrawCountAllowed(drawConfig, 1) then tostring(cost) else "--"
-	end
-
-	if price5x ~= nil then
-		price5x.Text = if isCoinDrawCountAllowed(drawConfig, 5) then tostring(cost * 5) else "--"
-	end
-
-	if coinsDrawPrice ~= nil then
-		coinsDrawPrice.Text = tostring(totalCost)
-	end
-
-	if gemsDrawPrice ~= nil then
-		gemsDrawPrice.Text = tostring(totalCost)
-	end
-
-	if spin1xButton ~= nil then
-		spin1xButton.Visible = true
-		setButtonTitle(spin1xButton, "Draw x1")
-		setDrawButtonEnabled(spin1xButton, isCoinDrawCountAllowed(drawConfig, 1))
-	end
-
-	if spin5xButton ~= nil then
-		spin5xButton.Visible = true
-		setButtonTitle(spin5xButton, "Draw x5")
-		setDrawButtonEnabled(spin5xButton, isCoinDrawCountAllowed(drawConfig, 5))
-	end
-end
-
-local function setSpinTypeButtonVisual(button: TextButton, selected: boolean)
-	button:SetAttribute(SELECTED_ATTRIBUTE, selected)
-
-	local deco = button:FindFirstChild("Deco")
-	if deco ~= nil then
-		local glow = deco:FindFirstChild("Glow", true)
-
-		if glow ~= nil and glow:IsA("GuiObject") then
-			glow.Visible = selected
-		end
-	end
-
-	local inner = button:FindFirstChild("Inner", true)
-	if inner ~= nil and inner:IsA("UIStroke") then
-		inner.Color = if selected then SELECTED_STROKE_COLOR else UNSELECTED_STROKE_COLOR
-	end
+	DrawPricingView.Update({
+		refs = {
+			spin1xButton = spin1xButton,
+			spin5xButton = spin5xButton,
+			price1x = price1x,
+			price5x = price5x,
+			coinsDrawPrice = coinsDrawPrice,
+			gemsDrawPrice = gemsDrawPrice,
+			price1xIcon = price1xIcon,
+			price5xIcon = price5xIcon,
+		},
+		currentDrawId = currentDrawId,
+		currentCount = currentCount,
+		resolvedDraw = resolvedDraw,
+		findRobuxDrawProduct = findRobuxDrawProduct,
+	})
 end
 
 local function updateSpinTypeButtonsVisual()
-	for _, instance in spinTypesButtons do
-		if not instance:IsDescendantOf(playerGui) then
-			continue
-		end
-
-		if not instance:IsA("TextButton") then
-			continue
-		end
-
-		local button = instance :: TextButton
-		local drawId = button:GetAttribute(DRAW_ID_ATTRIBUTE)
-		local isSelected = drawId == currentDrawId
-
-		setSpinTypeButtonVisual(button, isSelected)
-	end
-end
-
-local function getOrderedDraws(): { ResolvedDraw }
-	local orderedDraws = {} :: { ResolvedDraw }
-
-	for _, drawId in DrawConfig.DrawOrder do
-		if type(drawId) ~= "string" then
-			warn("[DrawController] DrawOrder contains a non-string draw id")
-			continue
-		end
-
-		local resolvedDraw = resolveDraw(drawId)
-		if resolvedDraw ~= nil then
-			table.insert(orderedDraws, resolvedDraw)
-		end
-	end
-
-	return orderedDraws
-end
-
-local function setSpinTypeButtonText(button: TextButton, resolvedDraw: ResolvedDraw)
-	local titleLabel = button:FindFirstChild("Title", true)
-	local categoryLabel = button:FindFirstChild("Category", true)
-	local drawConfig = resolvedDraw.config
-
-	if titleLabel ~= nil and titleLabel:IsA("TextLabel") then
-		titleLabel.Text = drawConfig.DisplayName
-	end
-
-	if categoryLabel ~= nil and categoryLabel:IsA("TextLabel") then
-		categoryLabel.Text = if resolvedDraw.kind == DRAW_KIND_ROBUX then "Robux" else "Coins"
-	end
-end
-
-local function getSortedTaggedSpinTypeButtons(): { TextButton }
-	local buttons = {} :: { TextButton }
-
-	for _, instance in CollectionService:GetTagged("SPIN_TYPE_BUTTON") do
-		if instance:IsDescendantOf(playerGui) and instance:IsA("TextButton") then
-			table.insert(buttons, instance)
-		end
-	end
-
-	table.sort(buttons, function(left, right)
-		if left.LayoutOrder ~= right.LayoutOrder then
-			return left.LayoutOrder < right.LayoutOrder
-		end
-
-		return left.Name < right.Name
-	end)
-
-	return buttons
+	DrawSpinTypeTabs.UpdateVisual(spinTypesButtons, playerGui, currentDrawId)
 end
 
 local function syncSpinTypeButtonsWithConfig()
-	local orderedDraws = getOrderedDraws()
-	local existingButtons = getSortedTaggedSpinTypeButtons()
-	local template: TextButton? = existingButtons[1]
-
-	if template == nil then
-		warn("[DrawController] no SPIN_TYPE_BUTTON template found")
-		spinTypesButtons = {}
-		return
-	end
-
-	for index, resolvedDraw in orderedDraws do
-		local button: TextButton? = existingButtons[index]
-		if button == nil then
-			local clonedButton = template:Clone() :: TextButton
-			clonedButton.Parent = template.Parent
-			CollectionService:AddTag(clonedButton, "SPIN_TYPE_BUTTON")
-			button = clonedButton
-		end
-
-		local resolvedButton = button :: TextButton
-		resolvedButton.Name = resolvedDraw.drawId
-		resolvedButton.LayoutOrder = index
-		resolvedButton.Visible = true
-		resolvedButton:SetAttribute(DRAW_ID_ATTRIBUTE, resolvedDraw.drawId)
-		resolvedButton:SetAttribute(SELECTED_ATTRIBUTE, false)
-		resolvedButton:SetAttribute(AUDIO_CLICK_EVENT_ATTRIBUTE, TAB_SWITCH_AUDIO_EVENT)
-		setSpinTypeButtonText(resolvedButton, resolvedDraw)
-	end
-
-	for index = #orderedDraws + 1, #existingButtons do
-		local button = existingButtons[index]
-		button.Visible = false
-		button:SetAttribute(DRAW_ID_ATTRIBUTE, nil)
-		button:SetAttribute(SPIN_TYPE_CONNECTED_ATTRIBUTE, nil)
-		CollectionService:RemoveTag(button, "SPIN_TYPE_BUTTON")
-	end
-
-	spinTypesButtons = {}
-	for _, button in getSortedTaggedSpinTypeButtons() do
-		table.insert(spinTypesButtons, button)
-	end
-
-	if currentDrawId == "" or resolveDraw(currentDrawId) == nil then
-		currentDrawId = getDefaultDrawId()
-	end
+	spinTypesButtons, currentDrawId = DrawSpinTypeTabs.SyncWithConfig(playerGui, currentDrawId)
 end
+
+local rollSequence = DrawRollSequence.new({
+	getDrawConfig = getDrawConfig,
+	refreshIdleUi = function()
+		updateCurrencyLabels()
+		updateDrawPrices()
+		updateSpinItems()
+		updateOddsFrame()
+		updateSpinTypeButtonsVisual()
+	end,
+})
 
 local function setCurrentDraw(drawId: string)
 	local drawConfig = getDrawConfig(drawId)
@@ -1158,540 +471,6 @@ local function setCurrentCount(count: number)
 	currentCount = count
 	print(`[DrawController] selected count: {count}`)
 	updateDrawPrices()
-end
-
-local function setSkipButtonTitle(text: string)
-	if skipDrawButton == nil then
-		return
-	end
-
-	local title = skipDrawButton:FindFirstChild("Title", true)
-
-	if title ~= nil and title:IsA("TextLabel") then
-		title.Text = text
-		return
-	end
-
-	skipDrawButton.Text = text
-end
-
-local function setRollExplanation(text: string)
-	if rollExplanationText ~= nil then
-		rollExplanationText.Text = text
-	end
-end
-
-local function clearRollClones()
-	if rollScrollingFrame == nil then
-		return
-	end
-
-	for _, child in rollScrollingFrame:GetChildren() do
-		if child:GetAttribute(ROLL_CLONE_ATTRIBUTE) == true then
-			child:Destroy()
-		end
-	end
-
-	rollScrollingFrame.CanvasPosition = Vector2.new(0, rollScrollingFrame.CanvasPosition.Y)
-end
-
-local function ensureRollListLayout(): UIListLayout?
-	if rollScrollingFrame == nil then
-		return nil
-	end
-
-	local existingLayout = rollScrollingFrame:FindFirstChildWhichIsA("UIListLayout")
-
-	if existingLayout ~= nil then
-		existingLayout.FillDirection = Enum.FillDirection.Horizontal
-		existingLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		return existingLayout
-	end
-
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 12)
-	layout.Parent = rollScrollingFrame
-
-	return layout
-end
-
-local function findRollTemplateByRarity(rarity: string): GuiObject?
-	if rollScrollingFrame == nil then
-		return nil
-	end
-
-	local upperRarity = string.upper(rarity)
-
-	local namesToTry = {
-		rarity,
-		upperRarity,
-		`{rarity}Template`,
-		`{upperRarity}_TEMPLATE`,
-		`{upperRarity}TEMPLATE`,
-	}
-
-	for _, name in namesToTry do
-		local found = rollScrollingFrame:FindFirstChild(name, true)
-
-		if found ~= nil and found:IsA("GuiObject") and found:GetAttribute(ROLL_CLONE_ATTRIBUTE) ~= true then
-			found:SetAttribute(ROLL_TEMPLATE_ATTRIBUTE, true)
-			return found
-		end
-	end
-
-	warn(`[DrawController] missing roll template for rarity: {rarity}`)
-	return nil
-end
-
-local function findFirstTextLabel(parent: Instance, names: { string }): TextLabel?
-	for _, name in names do
-		local found = parent:FindFirstChild(name, true)
-
-		if found ~= nil and found:IsA("TextLabel") then
-			return found
-		end
-	end
-
-	return nil
-end
-
-local function findItemIcon(root: Instance): ImageLabel?
-	local found = root:FindFirstChild("ItemIcon", true)
-	if found ~= nil and found:IsA("ImageLabel") then
-		return found
-	end
-
-	return nil
-end
-
-local function setRollCloneIcon(clone: GuiObject, item: RollVisualItem)
-	local icon = findItemIcon(clone)
-	if icon == nil then
-		return
-	end
-
-	local iconAssetId = item.iconAssetId
-	if iconAssetId == nil then
-		icon.Image = ""
-		icon.Visible = false
-		return
-	end
-
-	icon.Image = iconAssetId
-	icon.Visible = true
-	icon.Active = false
-	icon.Selectable = false
-	icon.Interactable = false
-end
-
-local function setRollCloneInfo(clone: GuiObject, item: RollVisualItem)
-	local titleLabel = findFirstTextLabel(clone, { "Title", "Name", "ItemName" })
-	local rarityLabel = findFirstTextLabel(clone, { "Rarity" })
-
-	if titleLabel ~= nil then
-		titleLabel.Text = item.displayName
-	end
-
-	if rarityLabel ~= nil then
-		rarityLabel.Text = item.rarity
-		rarityLabel.TextColor3 = getRarityColor(item.rarity)
-	end
-
-	setRollCloneIcon(clone, item)
-end
-
-local function createRollClone(item: RollVisualItem, layoutOrder: number): GuiObject?
-	if rollScrollingFrame == nil then
-		return nil
-	end
-
-	local template = findRollTemplateByRarity(item.rarity)
-	if template == nil then
-		return nil
-	end
-
-	local clone = template:Clone()
-	clone.Name = `ROLL_{layoutOrder}_{item.itemId}`
-	clone.Visible = true
-	clone.LayoutOrder = layoutOrder
-	clone:SetAttribute(ROLL_CLONE_ATTRIBUTE, true)
-	clone:SetAttribute("ITEM_ID", item.itemId)
-	clone:SetAttribute("RARITY", item.rarity)
-	clone:SetAttribute("CATEGORY", item.category)
-	clone.Parent = rollScrollingFrame
-
-	setRollCloneInfo(clone, item)
-
-	return clone
-end
-
-local function getRollVisualItemFromEntry(entry): RollVisualItem
-	return {
-		category = entry.Category,
-		itemId = entry.ItemId,
-		displayName = getInventoryDisplayName(entry.Category, entry.ItemId),
-		rarity = getInventoryRarity(entry.Category, entry.ItemId),
-		iconAssetId = InventoryItemVisuals.GetIconAssetId(entry.Category, entry.ItemId),
-	}
-end
-
-local function getRollVisualItemFromReward(reward: SkinDrawRewardPayload): RollVisualItem
-	return {
-		category = reward.category,
-		itemId = reward.itemId,
-		displayName = reward.displayName,
-		rarity = reward.rarity,
-		iconAssetId = InventoryItemVisuals.GetIconAssetId(reward.category, reward.itemId),
-	}
-end
-
-local function fireDrawRollTick()
-	EventBus.Fire(LOCAL_DRAW_ROLL_TICK_EVENT)
-end
-
-local function fireDrawRollStopped()
-	EventBus.Fire(LOCAL_DRAW_ROLL_STOPPED_EVENT)
-end
-
-local function hasRareDrawReward(result: SkinDrawResultPayload?): boolean
-	if result == nil then
-		return false
-	end
-
-	for _, reward in result.rewards do
-		if reward.rarity ~= "Common" then
-			return true
-		end
-	end
-
-	return false
-end
-
-local function fireDrawResultRevealed(result: SkinDrawResultPayload?)
-	EventBus.Fire(LOCAL_DRAW_RESULT_REVEALED_EVENT, hasRareDrawReward(result))
-end
-
-local function getSortedRollEntries(drawConfig): { any }
-	local entries = {}
-
-	for _, entry in drawConfig.Entries do
-		table.insert(entries, entry)
-	end
-
-	table.sort(entries, function(a, b)
-		local leftRarity = getInventoryRarity(a.Category, a.ItemId)
-		local rightRarity = getInventoryRarity(b.Category, b.ItemId)
-		local leftRank = rarityRank[leftRarity] or 0
-		local rightRank = rarityRank[rightRarity] or 0
-
-		if leftRank ~= rightRank then
-			return leftRank > rightRank
-		end
-
-		return getInventoryDisplayName(a.Category, a.ItemId) < getInventoryDisplayName(b.Category, b.ItemId)
-	end)
-
-	return entries
-end
-
-local function buildRollVisualItems(drawConfig, reward: SkinDrawRewardPayload): ({ RollVisualItem }, number)
-	local entries = getSortedRollEntries(drawConfig)
-	local targetItem = getRollVisualItemFromReward(reward)
-
-	if #entries <= 0 then
-		return { targetItem }, 1
-	end
-
-	local items = {} :: { RollVisualItem }
-
-	for index = 1, ROLL_LEAD_CARD_COUNT do
-		local entry = entries[((index - 1) % #entries) + 1]
-		table.insert(items, getRollVisualItemFromEntry(entry))
-	end
-
-	local targetIndex = #items + 1
-	table.insert(items, targetItem)
-
-	for index = 1, ROLL_TRAIL_CARD_COUNT do
-		local entry = entries[((index - 1) % #entries) + 1]
-		table.insert(items, getRollVisualItemFromEntry(entry))
-	end
-
-	return items, targetIndex
-end
-
-local function updateRollCanvasSize()
-	if rollScrollingFrame == nil then
-		return
-	end
-
-	local layout = rollScrollingFrame:FindFirstChildWhichIsA("UIListLayout")
-
-	if layout ~= nil then
-		rollScrollingFrame.CanvasSize = UDim2.fromOffset(layout.AbsoluteContentSize.X, 0)
-	end
-end
-
-local function getTargetCanvasPosition(targetClone: GuiObject): Vector2
-	if rollScrollingFrame == nil then
-		return Vector2.zero
-	end
-
-	local targetCenterX = targetClone.AbsolutePosition.X
-		- rollScrollingFrame.AbsolutePosition.X
-		+ rollScrollingFrame.CanvasPosition.X
-		+ (targetClone.AbsoluteSize.X * 0.5)
-
-	local viewportCenterX = rollScrollingFrame.AbsoluteSize.X * 0.5
-	local wantedX = math.max(0, targetCenterX - viewportCenterX)
-
-	return Vector2.new(wantedX, rollScrollingFrame.CanvasPosition.Y)
-end
-
-local function getRollTickDistancePixels(targetClone: GuiObject): number
-	local spacing = 0
-	if rollScrollingFrame ~= nil then
-		local layout = rollScrollingFrame:FindFirstChildWhichIsA("UIListLayout")
-		if layout ~= nil then
-			spacing = layout.Padding.Offset
-		end
-	end
-
-	return math.max(ROLL_TICK_MIN_DISTANCE_PIXELS, targetClone.AbsoluteSize.X + spacing)
-end
-
-local function connectRollTickPlayback(
-	token: number,
-	tween: Tween,
-	startCanvasX: number,
-	tickDistancePixels: number
-): RBXScriptConnection
-	local lastCanvasX = startCanvasX
-	local distanceSinceTick = tickDistancePixels
-	local lastTickAt = 0
-
-	return RunService.RenderStepped:Connect(function()
-		if token ~= rollToken or rollScrollingFrame == nil or rollTween ~= tween then
-			return
-		end
-
-		local currentCanvasX = rollScrollingFrame.CanvasPosition.X
-		local delta = math.abs(currentCanvasX - lastCanvasX)
-		lastCanvasX = currentCanvasX
-
-		if delta <= 0 then
-			return
-		end
-
-		distanceSinceTick += delta
-
-		local now = os.clock()
-		while distanceSinceTick >= tickDistancePixels do
-			if now - lastTickAt < ROLL_TICK_MIN_INTERVAL_SECONDS then
-				break
-			end
-
-			distanceSinceTick -= tickDistancePixels
-			lastTickAt = now
-			fireDrawRollTick()
-		end
-	end)
-end
-
-local function stopRollTween()
-	if rollTween ~= nil then
-		rollTween:Cancel()
-		rollTween = nil
-	end
-end
-
-local function finishRollUi()
-	isRolling = false
-	isDrawing = false
-	isWaitingForDrawResult = false
-	isRollFinished = true
-
-	stopRollTween()
-	setSkipButtonTitle("CLAIM")
-	fireDrawResultRevealed(latestDrawResult)
-end
-
-local function claimRollUi()
-	isRolling = false
-	isDrawing = false
-	isWaitingForDrawResult = false
-	isRollFinished = false
-	latestDrawResult = nil
-	rollToken += 1
-
-	stopRollTween()
-	clearRollClones()
-
-	setGuiVisible(rngFrame, false)
-	setGuiVisible(chooseDrawFrame, true)
-	setSkipButtonTitle("SKIP")
-	setRollExplanation("")
-
-	updateCurrencyLabels()
-	updateDrawPrices()
-	updateSpinItems()
-	updateOddsFrame()
-	updateSpinTypeButtonsVisual()
-end
-
-local function skipRoll()
-	local result = latestDrawResult
-
-	if result == nil then
-		claimRollUi()
-		return
-	end
-
-	rollToken += 1
-	stopRollTween()
-	clearRollClones()
-
-	local lastReward = result.rewards[#result.rewards]
-	if lastReward ~= nil then
-		local visualItem = getRollVisualItemFromReward(lastReward)
-		createRollClone(visualItem, 1)
-		setRollExplanation(lastReward.displayName)
-	end
-
-	fireDrawRollStopped()
-	finishRollUi()
-end
-
-local function playSingleRoll(
-	token: number,
-	drawConfig,
-	reward: SkinDrawRewardPayload,
-	_index: number,
-	_total: number
-): boolean
-	if rollScrollingFrame == nil then
-		return false
-	end
-
-	clearRollClones()
-	ensureRollListLayout()
-
-	rollScrollingFrame.CanvasPosition = Vector2.new(0, rollScrollingFrame.CanvasPosition.Y)
-
-	local visualItems, targetIndex = buildRollVisualItems(drawConfig, reward)
-	local targetClone: GuiObject?
-
-	for itemIndex, item in visualItems do
-		local clone = createRollClone(item, itemIndex)
-
-		if itemIndex == targetIndex then
-			targetClone = clone
-		end
-	end
-
-	task.wait()
-	updateRollCanvasSize()
-	task.wait()
-
-	if token ~= rollToken then
-		return false
-	end
-
-	if targetClone == nil then
-		return false
-	end
-
-	setRollExplanation("Rolling...")
-
-	local targetCanvasPosition = getTargetCanvasPosition(targetClone)
-
-	local tween = TweenService:Create(
-		rollScrollingFrame,
-		TweenInfo.new(ROLL_DURATION_SECONDS, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-		{
-			CanvasPosition = targetCanvasPosition,
-		}
-	)
-
-	rollTween = tween
-
-	local completed = false
-	local completedConnection = tween.Completed:Connect(function()
-		completed = true
-	end)
-	local tickConnection = connectRollTickPlayback(
-		token,
-		tween,
-		rollScrollingFrame.CanvasPosition.X,
-		getRollTickDistancePixels(targetClone)
-	)
-
-	tween:Play()
-
-	while not completed and token == rollToken do
-		task.wait(0.03)
-	end
-
-	tickConnection:Disconnect()
-	completedConnection:Disconnect()
-
-	if rollTween == tween then
-		rollTween = nil
-	end
-
-	if token ~= rollToken then
-		return false
-	end
-
-	rollScrollingFrame.CanvasPosition = targetCanvasPosition
-	setRollExplanation(reward.displayName)
-	fireDrawRollStopped()
-
-	task.wait(ROLL_RESULT_WAIT_SECONDS)
-
-	return token == rollToken
-end
-
-local function startRollSequence(result: SkinDrawResultPayload)
-	local drawConfig = getDrawConfig(result.drawId)
-	if drawConfig == nil then
-		isDrawing = false
-		isWaitingForDrawResult = false
-		return
-	end
-
-	latestDrawResult = result
-	isRolling = true
-	isDrawing = true
-	isWaitingForDrawResult = false
-	isRollFinished = false
-	rollToken += 1
-
-	local token = rollToken
-
-	setGuiVisible(chooseDrawFrame, false)
-	setGuiVisible(rngFrame, true)
-	setSkipButtonTitle("SKIP")
-	setRollExplanation("Rolling...")
-
-	task.spawn(function()
-		for index, reward in result.rewards do
-			if token ~= rollToken then
-				return
-			end
-
-			local completed = playSingleRoll(token, drawConfig, reward, index, #result.rewards)
-			if not completed then
-				return
-			end
-		end
-
-		if token == rollToken then
-			finishRollUi()
-		end
-	end)
 end
 
 local function getDrawResultMessage(result: SkinDrawResultPayload): string
@@ -1721,133 +500,38 @@ local function handleSkinDrawResult(payload: SkinDrawResultPayload)
 	updateDrawPrices()
 
 	if not payload.success then
-		isDrawing = false
-		isRolling = false
-		isWaitingForDrawResult = false
-
-		setGuiVisible(chooseDrawFrame, true)
-		setGuiVisible(rngFrame, false)
+		rollSequence:ResetAfterFailure()
 
 		warn(`[DrawController] draw failed: {getDrawResultMessage(payload)}`)
 		return
 	end
 
 	if #payload.rewards <= 0 then
-		isDrawing = false
-		isRolling = false
-		isWaitingForDrawResult = false
+		rollSequence:ResetAfterEmptyResult()
 
 		warn("[DrawController] draw succeeded but returned no rewards")
 		return
 	end
 
-	startRollSequence(payload)
-end
-
-local function requestCoinDraw(drawConfig: any, count: number)
-	readBalanceAttribute()
-
-	if type(drawConfig.Cost) ~= "number" or drawConfig.Cost <= 0 then
-		warn(`[DrawController] coin draw {currentDrawId} has invalid Cost`)
-		return
-	end
-
-	local cost = drawConfig.Cost * count
-	if currentBalance < cost then
-		warn(`[DrawController] not enough coins. need {math.max(0, cost - currentBalance)} more coins`)
-		return
-	end
-
-	setCurrentCount(count)
-
-	isDrawing = true
-	isWaitingForDrawResult = true
-	isRollFinished = false
-
-	setGuiVisible(chooseDrawFrame, false)
-	setGuiVisible(rngFrame, true)
-	setSkipButtonTitle("SKIP")
-	setRollExplanation("Rolling...")
-	clearRollClones()
-
-	requestSkinDrawRemote:FireServer({
-		drawId = currentDrawId,
-		count = count,
-	})
-end
-
-local function requestRobuxDraw(count: number)
-	local product = findRobuxDrawProduct(currentDrawId, count)
-	if product == nil then
-		warn(`[DrawController] no Robux product configured for draw {currentDrawId} x{count}`)
-		return
-	end
-
-	if product.productId <= 0 then
-		warn(`[DrawController] Robux product {product.productKey} for draw {currentDrawId} has no ProductId configured`)
-		return
-	end
-
-	setCurrentCount(count)
-	isDrawing = true
-	isWaitingForDrawResult = true
-	isRollFinished = false
-
-	local purchaseFinishedConnection: RBXScriptConnection?
-	purchaseFinishedConnection = MarketplaceService.PromptProductPurchaseFinished:Connect(
-		function(userId: number, productId: number, wasPurchased: boolean)
-			if userId ~= localPlayer.UserId or productId ~= product.productId then
-				return
-			end
-
-			if purchaseFinishedConnection ~= nil then
-				purchaseFinishedConnection:Disconnect()
-				purchaseFinishedConnection = nil
-			end
-
-			if not wasPurchased then
-				isDrawing = false
-				isWaitingForDrawResult = false
-				setGuiVisible(chooseDrawFrame, true)
-				setGuiVisible(rngFrame, false)
-				updateDrawPrices()
-			end
-		end
-	)
-
-	local ok, err = pcall(MarketplaceService.PromptProductPurchase, MarketplaceService, localPlayer, product.productId)
-	if not ok then
-		if purchaseFinishedConnection ~= nil then
-			purchaseFinishedConnection:Disconnect()
-			purchaseFinishedConnection = nil
-		end
-
-		isDrawing = false
-		isWaitingForDrawResult = false
-		warn(`[DrawController] failed to prompt Robux product {product.productKey}: {tostring(err)}`)
-	end
-end
-
-local function requestDraw(count: number)
-	if isDrawing or isRolling or isWaitingForDrawResult then
-		return
-	end
-
-	local resolvedDraw = resolveDraw(currentDrawId)
-	if resolvedDraw == nil then
-		return
-	end
-
-	if resolvedDraw.kind == DRAW_KIND_ROBUX then
-		requestRobuxDraw(count)
-		return
-	end
-
-	requestCoinDraw(resolvedDraw.config, count)
+	rollSequence:Start(payload)
 end
 
 local function onDrawButtonClicked(count: number)
-	requestDraw(count)
+	DrawRequestFlow.Request({
+		count = count,
+		currentDrawId = currentDrawId,
+		localPlayer = localPlayer,
+		requestSkinDrawRemote = requestSkinDrawRemote,
+		rollSequence = rollSequence,
+		resolveDraw = resolveDraw,
+		findRobuxDrawProduct = findRobuxDrawProduct,
+		readBalance = readBalanceAttribute,
+		getBalance = function()
+			return currentBalance
+		end,
+		setCurrentCount = setCurrentCount,
+		updateDrawPrices = updateDrawPrices,
+	})
 end
 
 local function connectSpinTypeButtons()
@@ -1894,6 +578,8 @@ local function connectSpinTypeButtons()
 end
 
 local function closeDrawUi()
+	clearHighlightPreview()
+	DrawPresentationState.Disable()
 	setScreenEnabled(false)
 	setHudVisible(true)
 end
@@ -1934,8 +620,7 @@ local function connectCharacterReset()
 	table.insert(
 		connections,
 		localPlayer.CharacterAdded:Connect(function()
-			setScreenEnabled(false)
-			setHudVisible(true)
+			closeDrawUi()
 			task.defer(syncDrawEntryButtons)
 		end)
 	)
@@ -1958,6 +643,7 @@ function DrawController:GetReferences()
 	spinItems = getReferenceByTag("SPIN_ITEMS") :: Frame?
 
 	screen = getReferenceByTag("SPIN_SCREEN") :: ScreenGui?
+	resolveHighlightPreviewReferences()
 
 	chooseDrawFrame = getReferenceByTag("CHOOSE_DRAW_FRAME") :: Frame?
 	rngFrame = getReferenceByTag("RNG_FRAME") :: Frame?
@@ -2003,6 +689,14 @@ function DrawController:GetReferences()
 			price5xIcon = icon
 		end
 	end
+
+	rollSequence:SetRefs({
+		chooseDrawFrame = chooseDrawFrame,
+		rngFrame = rngFrame,
+		rollScrollingFrame = rollScrollingFrame,
+		rollExplanationText = rollExplanationText,
+		skipDrawButton = skipDrawButton,
+	})
 end
 
 function DrawController:BuildUI()
@@ -2026,9 +720,7 @@ function DrawController:BuildUI()
 	connectCharacterReset()
 	syncDrawEntryButtons()
 
-	setGuiVisible(chooseDrawFrame, true)
-	setGuiVisible(rngFrame, false)
-	setSkipButtonTitle("SKIP")
+	rollSequence:ResetToChoose(false)
 
 	updateCurrencyLabels()
 	updateDrawPrices()
@@ -2067,15 +759,7 @@ function DrawController:BuildUI()
 		table.insert(
 			connections,
 			skipDrawButton.Activated:Connect(function()
-				if isRolling or isWaitingForDrawResult then
-					skipRoll()
-					return
-				end
-
-				if isRollFinished then
-					claimRollUi()
-					return
-				end
+				rollSequence:HandleSkipOrClaim()
 			end)
 		)
 	end
@@ -2148,13 +832,13 @@ function DrawController:Open()
 
 	setScreenEnabled(true)
 	setHudVisible(false)
+	DrawPresentationState.Enable()
 	syncSpinTypeButtonsWithConfig()
+	resolveHighlightPreviewReferences()
 
-	if not isDrawing and not isRolling and not isWaitingForDrawResult and not isRollFinished then
+	if not rollSequence:IsBusy() and not rollSequence:IsRollFinished() then
 		setGuiVisible(chooseDrawFrame, true)
 		setGuiVisible(rngFrame, false)
-		setSkipButtonTitle("SKIP")
-		setRollExplanation("")
 	end
 
 	updateCurrencyLabels()

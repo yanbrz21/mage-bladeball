@@ -138,7 +138,6 @@ local inventoryButton: GuiButton?
 local abilitiesButton: TextButton?
 local skinsButton: TextButton?
 local shopButton: TextButton?
-local HUD_SCREENGUI: ScreenGui?
 
 local ownedRowTemplate: Frame?
 local unownedRowTemplate: Frame?
@@ -211,18 +210,6 @@ local function setScreenVisible(visible: boolean)
 	end
 end
 
-local function setGuiVisible(instance: Instance?, visible: boolean)
-	if instance == nil then
-		return
-	end
-
-	if instance:IsA("ScreenGui") then
-		instance.Enabled = visible
-	elseif instance:IsA("GuiObject") then
-		instance.Visible = visible
-	end
-end
-
 local function preventGuiResetOnSpawn(instance: Instance?)
 	local current = instance
 	while current ~= nil do
@@ -245,12 +232,7 @@ end
 
 local function preventInventoryGuiResetOnSpawn()
 	preventTaggedGuiResetOnSpawn("INVENTORY_BUTTON")
-	preventTaggedGuiResetOnSpawn("SIDEMENU")
 	preventTaggedGuiResetOnSpawn("INVENTORY_SCREEN")
-end
-
-local function setHudVisible(visible: boolean)
-	setGuiVisible(HUD_SCREENGUI, visible)
 end
 
 local function isLocalPlayerLockedForRound(): boolean
@@ -314,21 +296,9 @@ local function handleInventoryScreenAdded(instance: Instance)
 	end)
 end
 
-local function handleSideMenuAdded(instance: Instance)
-	if not instance:IsDescendantOf(playerGui) then
-		return
-	end
-
-	HUD_SCREENGUI = instance :: any
-	preventGuiResetOnSpawn(instance)
-	setHudVisible(true)
-	syncInventoryEntryButtons()
-end
-
 local function closeInventoryUi()
 	InventoryUpgradeConfirm.Hide()
 	setScreenVisible(false)
-	setHudVisible(true)
 end
 
 local function setEquipButtonText(text: string)
@@ -1892,7 +1862,6 @@ function InventoryController:GetReferences()
 	abilitiesButton = nil
 	skinsButton = nil
 	shopButton = nil
-	HUD_SCREENGUI = nil
 	ownedRowTemplate = nil
 	unownedRowTemplate = nil
 	unownedTitle = nil
@@ -1910,8 +1879,6 @@ function InventoryController:GetReferences()
 	itemImage = getOptionalReferenceByTag("INVENTORY_ITEM_IMAGE") :: ImageLabel?
 	itemEquipButton = getReferenceByTag("INVENTORY_EQUIP_BUTTON") :: TextButton?
 	abilityUpgradeButton = getOptionalReferenceByTag("INVENTORY_UPGRADE_BUTTON") :: TextButton?
-
-	HUD_SCREENGUI = getReferenceByTag("SIDEMENU") :: ScreenGui?
 
 	abilitiesButton = getReferenceByTag("INVENTORY_ABILITIES_BUTTON") :: TextButton?
 	skinsButton = getReferenceByTag("INVENTORY_SKINS_BUTTON") :: TextButton?
@@ -2047,7 +2014,6 @@ function InventoryController:BuildScreen()
 	updatePageButtonsVisual()
 
 	setScreenVisible(false)
-	setHudVisible(true)
 	connectCharacterReset()
 	syncInventoryEntryButtons()
 
@@ -2067,7 +2033,6 @@ function InventoryController:BuildScreen()
 		connections,
 		CollectionService:GetInstanceAddedSignal("INVENTORY_SCREEN"):Connect(handleInventoryScreenAdded)
 	)
-	table.insert(connections, CollectionService:GetInstanceAddedSignal("SIDEMENU"):Connect(handleSideMenuAdded))
 
 	self:ConnectScreenControls()
 
@@ -2217,7 +2182,6 @@ function InventoryController:Open()
 
 	refreshScreenReferences()
 	setScreenVisible(true)
-	setHudVisible(false)
 
 	if currentPage ~= PAGE_ABILITIES and currentPage ~= PAGE_SKINS and currentPage ~= PAGE_SHOP then
 		currentPage = PAGE_ABILITIES
