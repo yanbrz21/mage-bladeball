@@ -45,10 +45,6 @@ local DRAW_KIND_ROBUX = "Robux"
 local COIN_PRICE_ICON = "rbxassetid://87190121549893"
 local ROBUX_PRICE_ICON = "rbxassetid://138110852462666"
 
-local GACHA_PART_TAG = "GACHA_PART"
-local GACHA_PART_MARGIN = 2.5
-local GACHA_PART_CHECK_INTERVAL = 0.1
-
 local ROLL_CLONE_ATTRIBUTE = "IS_ROLL_CLONE"
 local ROLL_TEMPLATE_ATTRIBUTE = "IS_ROLL_TEMPLATE"
 
@@ -195,10 +191,6 @@ local playerGui = localPlayer:WaitForChild("PlayerGui")
 local currentDrawId = ""
 local currentCount = 1
 local currentBalance = 0
-
-local lastGachaPartCheck = 0
-local isWatchingGachaPart = false
-local wasInsideGachaPart = false
 
 local isDrawing = false
 local isRolling = false
@@ -373,59 +365,6 @@ local function handleSideMenuAdded(instance: Instance)
 	preventGuiResetOnSpawn(instance)
 	setHudVisible(true)
 	syncDrawEntryButtons()
-end
-
-local function getGachaBasePart(instance: Instance): BasePart?
-	if instance:IsA("BasePart") then
-		return instance
-	end
-
-	if instance:IsA("Model") then
-		local primaryPart = instance.PrimaryPart
-		if primaryPart ~= nil then
-			return primaryPart
-		end
-
-		local foundPart = instance:FindFirstChildWhichIsA("BasePart", true)
-		if foundPart ~= nil then
-			return foundPart
-		end
-	end
-
-	return nil
-end
-
-local function isPositionInsidePart(part: BasePart, worldPosition: Vector3): boolean
-	local localPosition = part.CFrame:PointToObjectSpace(worldPosition)
-	local halfSize = part.Size * 0.5
-
-	return math.abs(localPosition.X) <= halfSize.X + GACHA_PART_MARGIN
-		and math.abs(localPosition.Y) <= halfSize.Y + GACHA_PART_MARGIN
-		and math.abs(localPosition.Z) <= halfSize.Z + GACHA_PART_MARGIN
-end
-
-local function isInsideAnyGachaPart(): boolean
-	local character = localPlayer.Character
-	if character == nil then
-		return false
-	end
-
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if rootPart == nil or not rootPart:IsA("BasePart") then
-		return false
-	end
-
-	for _, taggedInstance in CollectionService:GetTagged(GACHA_PART_TAG) do
-		local gachaPart = getGachaBasePart(taggedInstance)
-
-		if gachaPart ~= nil and gachaPart:IsDescendantOf(workspace) then
-			if isPositionInsidePart(gachaPart, rootPart.Position) then
-				return true
-			end
-		end
-	end
-
-	return false
 end
 
 local function resolveDraw(drawId: string): ResolvedDraw?
@@ -1991,39 +1930,10 @@ local function connectDrawClose()
 	)
 end
 
-local function startGachaPartWatcher()
-	if isWatchingGachaPart then
-		return
-	end
-
-	isWatchingGachaPart = true
-	wasInsideGachaPart = false
-
-	table.insert(
-		connections,
-		RunService.Heartbeat:Connect(function()
-			local now = os.clock()
-
-			if now - lastGachaPartCheck < GACHA_PART_CHECK_INTERVAL then
-				return
-			end
-
-			lastGachaPartCheck = now
-
-			local isInside = isInsideAnyGachaPart()
-
-			if isInside and not wasInsideGachaPart and not isLocalPlayerLockedForRound() then
-				DrawController:Open()
-			end
-
-			wasInsideGachaPart = isInside
-		end)
-	)
-
+local function connectCharacterReset()
 	table.insert(
 		connections,
 		localPlayer.CharacterAdded:Connect(function()
-			wasInsideGachaPart = false
 			setScreenEnabled(false)
 			setHudVisible(true)
 			task.defer(syncDrawEntryButtons)
@@ -2113,7 +2023,7 @@ function DrawController:BuildUI()
 
 	setScreenEnabled(false)
 	setHudVisible(true)
-	startGachaPartWatcher()
+	connectCharacterReset()
 	syncDrawEntryButtons()
 
 	setGuiVisible(chooseDrawFrame, true)

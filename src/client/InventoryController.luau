@@ -42,10 +42,6 @@ local PAGE_ABILITIES = "Abilities"
 local PAGE_SKINS = "Skins"
 local PAGE_SHOP = "Shop"
 
-local INVENTORY_PART_TAG = "INVENTORY_PART"
-local INVENTORY_PART_MARGIN = 2.5
-local INVENTORY_PART_CHECK_INTERVAL = 0.1
-
 local ITEMS_PER_ROW = 3
 local INVENTORY_CANVAS_BOTTOM_PADDING = 24
 local SHOP_TEMPLATE_RARITY = "Common"
@@ -156,9 +152,6 @@ local selectedItemOwned = false
 local selectedShopProductKey: string?
 local currentPage = PAGE_ABILITIES
 
-local lastInventoryPartCheck = 0
-local isWatchingInventoryPart = false
-local wasInsideInventoryPart = false
 local inventoryCanvasUpdateToken = 0
 
 local connections: { RBXScriptConnection } = {}
@@ -336,58 +329,6 @@ local function closeInventoryUi()
 	InventoryUpgradeConfirm.Hide()
 	setScreenVisible(false)
 	setHudVisible(true)
-end
-
-local function getInventoryBasePart(instance: Instance): BasePart?
-	if instance:IsA("BasePart") then
-		return instance
-	end
-
-	if instance:IsA("Model") then
-		if instance.PrimaryPart ~= nil then
-			return instance.PrimaryPart
-		end
-
-		local foundPart = instance:FindFirstChildWhichIsA("BasePart", true)
-		if foundPart ~= nil then
-			return foundPart
-		end
-	end
-
-	return nil
-end
-
-local function isPositionInsidePart(part: BasePart, worldPosition: Vector3): boolean
-	local localPosition = part.CFrame:PointToObjectSpace(worldPosition)
-	local halfSize = part.Size * 0.5
-
-	return math.abs(localPosition.X) <= halfSize.X + INVENTORY_PART_MARGIN
-		and math.abs(localPosition.Y) <= halfSize.Y + INVENTORY_PART_MARGIN
-		and math.abs(localPosition.Z) <= halfSize.Z + INVENTORY_PART_MARGIN
-end
-
-local function isInsideAnyInventoryPart(): boolean
-	local character = localPlayer.Character
-	if character == nil then
-		return false
-	end
-
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if rootPart == nil or not rootPart:IsA("BasePart") then
-		return false
-	end
-
-	for _, taggedInstance in CollectionService:GetTagged(INVENTORY_PART_TAG) do
-		local inventoryPart = getInventoryBasePart(taggedInstance)
-
-		if inventoryPart ~= nil and inventoryPart:IsDescendantOf(workspace) then
-			if isPositionInsidePart(inventoryPart, rootPart.Position) then
-				return true
-			end
-		end
-	end
-
-	return false
 end
 
 local function setEquipButtonText(text: string)
@@ -1925,39 +1866,10 @@ local function setCurrentPage(page: string)
 	InventoryController:RenderInventory()
 end
 
-local function startInventoryPartWatcher()
-	if isWatchingInventoryPart then
-		return
-	end
-
-	isWatchingInventoryPart = true
-	wasInsideInventoryPart = false
-
-	table.insert(
-		connections,
-		RunService.Heartbeat:Connect(function()
-			local now = os.clock()
-
-			if now - lastInventoryPartCheck < INVENTORY_PART_CHECK_INTERVAL then
-				return
-			end
-
-			lastInventoryPartCheck = now
-
-			local isInside = isInsideAnyInventoryPart()
-
-			if isInside and not wasInsideInventoryPart and not isLocalPlayerLockedForRound() then
-				InventoryController:Open()
-			end
-
-			wasInsideInventoryPart = isInside
-		end)
-	)
-
+local function connectCharacterReset()
 	table.insert(
 		connections,
 		localPlayer.CharacterAdded:Connect(function()
-			wasInsideInventoryPart = false
 			closeInventoryUi()
 			task.defer(syncInventoryEntryButtons)
 		end)
@@ -2136,7 +2048,7 @@ function InventoryController:BuildScreen()
 
 	setScreenVisible(false)
 	setHudVisible(true)
-	startInventoryPartWatcher()
+	connectCharacterReset()
 	syncInventoryEntryButtons()
 
 	if inventoryItemInfo ~= nil then
