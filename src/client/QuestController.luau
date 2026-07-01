@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Network = Shared:WaitForChild("Network")
 
+local QuestConfig = require(Shared.Config.QuestConfig)
 local Remotes = require(Network:WaitForChild("Remotes"))
 
 local questUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.QuestUpdated)
@@ -26,26 +27,19 @@ local QUEST_REWARD_ITEMS_TAG = "QUEST_REWARD_ITEMS"
 
 local TEMPLATE_NAME = "QuestTemplate"
 local REWARD_ITEM_TEMPLATE_NAME = "Template"
+local SEGMENT_TEMPLATE_NAME = "SegmentTemplate"
 
 local QUEST_CLONE_ATTRIBUTE = "IS_QUEST_CLONE"
+local QUEST_SEGMENT_CLONE_ATTRIBUTE = "IS_QUEST_SEGMENT_CLONE"
 
-local DAILY_KILL_TARGET = 15
-
-local KILL_REWARD_MILESTONES = table.freeze({
-	{ kills = 5, rewardCoins = 100, positionScale = 0.3 },
-	{ kills = 10, rewardCoins = 100, positionScale = 0.6 },
-	{ kills = 15, rewardCoins = 100, positionScale = 0.9 },
-})
-
-type KillRewardMilestone = {
-	kills: number,
-	rewardCoins: number,
-	positionScale: number,
-}
+local DAILY_KILL_QUEST_ID = "daily_kills"
 
 type ClaimedMilestones = {
 	[string]: boolean,
 }
+
+type QuestDefinition = QuestConfig.QuestDefinition
+type QuestKillMilestone = QuestConfig.QuestKillMilestone
 
 type QuestSnapshotEntry = {
 	questId: string,
@@ -70,13 +64,18 @@ local questContainer: GuiObject?
 local questTimer: TextLabel?
 local questTemplate: Frame?
 
+local questKillBar: Frame?
 local questKillBarFill: Frame?
+local questKillBarSegmentTemplate: Frame?
 local questRewardItems: Frame?
 
 local currentSnapshot: QuestSnapshot?
 local connections: { RBXScriptConnection } = {}
+local renderConnections: { RBXScriptConnection } = {}
 
 local lastTimerUpdate = 0
+local isResolvingReferences = false
+local referencesReady = false
 
 local function log(message: string)
 	if DEBUG then
@@ -84,18 +83,25 @@ local function log(message: string)
 	end
 end
 
-local function getTaggedInstance(tag: string): Instance?
-	local tagged = CollectionService:GetTagged(tag)
+local function getTaggedInstance(tag: string, timeout: number?): Instance?
+	local startedAt = os.clock()
+	local maxWait = timeout or 10
 
-	log(`searching tag {tag}, found {#tagged}`)
+	while os.clock() - startedAt < maxWait do
+		local tagged = CollectionService:GetTagged(tag)
 
-	for _, instance in tagged do
-		log(`tag {tag} candidate: {instance:GetFullName()} class={instance.ClassName}`)
+		log(`searching tag {tag}, found {#tagged}`)
 
-		if instance:IsDescendantOf(Workspace) then
-			log(`tag {tag} selected: {instance:GetFullName()}`)
-			return instance
+		for _, instance in tagged do
+			log(`tag {tag} candidate: {instance:GetFullName()} class={instance.ClassName}`)
+
+			if instance:IsDescendantOf(Workspace) then
+				log(`tag {tag} selected: {instance:GetFullName()}`)
+				return instance
+			end
 		end
+
+		task.wait(0.1)
 	end
 
 	warn(`[QuestController] missing tagged workspace instance: {tag}`)
@@ -136,21 +142,60 @@ local function getQuestPercentage(quest: QuestSnapshotEntry): number
 	return math.clamp(quest.progress / math.max(quest.target, 1), 0, 1)
 end
 
-local function getDailyKillPercentage(quest: QuestSnapshotEntry): number
-	return math.clamp(quest.progress / DAILY_KILL_TARGET, 0, 1)
+local function getDailyKillDefinition(quest: QuestSnapshotEntry): QuestDefinition?
+	if quest.questId ~= DAILY_KILL_QUEST_ID then
+		return nil
+	end
+
+	local definition = QuestConfig.Definitions[quest.questId]
+	if definition == nil or definition.KillMilestones == nil then
+		return nil
+	end
+
+	return definition
 end
 
-local function isKillQuest(quest: QuestSnapshotEntry): boolean
-	local questId = string.lower(quest.questId)
-	local displayName = string.lower(quest.displayName)
-	local description = string.lower(quest.description)
-	local eventName = string.lower(quest.eventName or "")
+local function getKillMilestones(quest: QuestSnapshotEntry): { QuestKillMilestone }?
+	local definition = getDailyKillDefinition(quest)
+	if definition == nil then
+		return nil
+	end
 
-	return string.find(questId, "daily_kills") ~= nil
-		or string.find(questId, "kill") ~= nil
-		or string.find(displayName, "kill") ~= nil
-		or string.find(description, "kill") ~= nil
-		or string.find(eventName, "kill") ~= nil
+	return definition.KillMilestones
+end
+
+local function getMilestoneTarget(milestones: { QuestKillMilestone }): number
+	local finalMilestone = milestones[#milestones]
+	if finalMilestone == nil then
+		return 1
+	end
+
+	return math.max(1, finalMilestone.Kills)
+end
+
+local function getDailyKillPercentage(quest: QuestSnapshotEntry, milestones: { QuestKillMilestone }): number
+	return math.clamp(quest.progress / getMilestoneTarget(milestones), 0, 1)
+end
+
+local function getMilestonePositionScale(milestone: QuestKillMilestone, milestones: { QuestKillMilestone }): number
+	return math.clamp(milestone.Kills / getMilestoneTarget(milestones), 0, 1)
+end
+
+local function clampByCloneWidth(scale: number, clone: GuiObject): number
+	local halfWidthScale = math.max(0, clone.Size.X.Scale) * 0.5
+	if halfWidthScale >= 0.5 then
+		return 0.5
+	end
+
+	return math.clamp(scale, halfWidthScale, 1 - halfWidthScale)
+end
+
+local function clearRenderConnections()
+	for _, connection in renderConnections do
+		connection:Disconnect()
+	end
+
+	table.clear(renderConnections)
 end
 
 local function setClaimButtonTitle(button: GuiButton, text: string)
@@ -197,7 +242,7 @@ end
 local function connectRewardButtons(
 	clone: Frame,
 	quest: QuestSnapshotEntry,
-	milestone: KillRewardMilestone,
+	milestone: QuestKillMilestone,
 	reached: boolean,
 	claimed: boolean
 )
@@ -206,10 +251,10 @@ local function connectRewardButtons(
 	local itemButton = findGuiButton(clone, "Item")
 
 	local function tryClaim(source: string)
-		log(`{source} clicked quest={quest.questId} milestone={milestone.kills} reached={reached} claimed={claimed}`)
+		log(`{source} clicked quest={quest.questId} milestone={milestone.Kills} reached={reached} claimed={claimed}`)
 
 		if canClaim then
-			fireClaimQuest(quest, milestone.kills)
+			fireClaimQuest(quest, milestone.Kills)
 		end
 	end
 
@@ -217,7 +262,7 @@ local function connectRewardButtons(
 		setClaimButtonVisual(claimButton, reached, claimed)
 
 		table.insert(
-			connections,
+			renderConnections,
 			claimButton.Activated:Connect(function()
 				tryClaim("Claim")
 			end)
@@ -230,7 +275,7 @@ local function connectRewardButtons(
 		setButtonInteractable(itemButton, canClaim)
 
 		table.insert(
-			connections,
+			renderConnections,
 			itemButton.Activated:Connect(function()
 				tryClaim("Item")
 			end)
@@ -259,7 +304,7 @@ local function setRewards(rewardsFrame: Frame, quest: QuestSnapshotEntry)
 		setClaimButtonVisual(claimButton, quest.completed, quest.claimed)
 
 		table.insert(
-			connections,
+			renderConnections,
 			claimButton.Activated:Connect(function()
 				if quest.completed and not quest.claimed then
 					fireClaimQuest(quest, nil)
@@ -274,6 +319,8 @@ local function getQuestTitle(quest: QuestSnapshotEntry): string
 end
 
 local function clearQuestClones()
+	clearRenderConnections()
+
 	if questContainer == nil then
 		return
 	end
@@ -292,6 +339,18 @@ local function clearRewardItemClones()
 
 	for _, child in questRewardItems:GetChildren() do
 		if child:GetAttribute(QUEST_CLONE_ATTRIBUTE) == true then
+			child:Destroy()
+		end
+	end
+end
+
+local function clearKillBarSegmentClones()
+	if questKillBar == nil then
+		return
+	end
+
+	for _, child in questKillBar:GetChildren() do
+		if child:GetAttribute(QUEST_SEGMENT_CLONE_ATTRIBUTE) == true then
 			child:Destroy()
 		end
 	end
@@ -365,7 +424,11 @@ local function renderQuest(quest: QuestSnapshotEntry, layoutOrder: number)
 	end
 end
 
-local function renderRewardMilestone(quest: QuestSnapshotEntry, milestone: KillRewardMilestone)
+local function renderRewardMilestone(
+	quest: QuestSnapshotEntry,
+	milestone: QuestKillMilestone,
+	milestones: { QuestKillMilestone }
+)
 	if questRewardItems == nil then
 		warn("[QuestController] questRewardItems nil")
 		return
@@ -378,17 +441,21 @@ local function renderRewardMilestone(quest: QuestSnapshotEntry, milestone: KillR
 		return
 	end
 
-	local reached = quest.progress >= milestone.kills
+	local reached = quest.progress >= milestone.Kills
 	local claimedMilestones = quest.claimedMilestones or {}
-	local claimed = claimedMilestones[tostring(milestone.kills)] == true
+	local claimed = claimedMilestones[tostring(milestone.Kills)] == true
 
 	local clone = template:Clone()
-	clone.Name = `Reward_{quest.questId}_{milestone.kills}Kills`
+	clone.Name = `Reward_{quest.questId}_{milestone.Kills}Kills`
 	clone.Visible = true
 	clone:SetAttribute(QUEST_CLONE_ATTRIBUTE, true)
 	clone:SetAttribute("QUEST_ID", quest.questId)
-	clone:SetAttribute("REWARD_KILLS", milestone.kills)
-	clone.Position = UDim2.fromScale(math.clamp(milestone.positionScale, 0, 0.9), clone.Position.Y.Scale)
+	clone:SetAttribute("REWARD_KILLS", milestone.Kills)
+	clone.AnchorPoint = Vector2.new(0.5, clone.AnchorPoint.Y)
+	clone.Position = UDim2.fromScale(
+		clampByCloneWidth(getMilestonePositionScale(milestone, milestones), clone),
+		clone.Position.Y.Scale
+	)
 	clone.Parent = questRewardItems
 
 	log(`created reward clone {clone:GetFullName()} reached={reached} claimed={claimed}`)
@@ -398,19 +465,46 @@ local function renderRewardMilestone(quest: QuestSnapshotEntry, milestone: KillR
 	local coins = clone:FindFirstChild("Coins", true)
 
 	if coins ~= nil and coins:IsA("GuiObject") then
-		coins.Visible = milestone.rewardCoins > 0
+		coins.Visible = milestone.RewardCoins > 0
 
 		local count = findTextLabel(coins, "Count") or findTextLabel(coins, "Amount") or findTextLabel(coins, "Title")
 
 		if count ~= nil then
-			count.Text = tostring(milestone.rewardCoins)
+			count.Text = tostring(milestone.RewardCoins)
 		end
+	end
+end
+
+local function renderKillBarSegment(
+	milestone: QuestKillMilestone,
+	milestones: { QuestKillMilestone },
+	previousPositionScale: number
+)
+	if questKillBar == nil or questKillBarSegmentTemplate == nil then
+		return
+	end
+
+	local positionScale = getMilestonePositionScale(milestone, milestones)
+	local segmentWidthScale = math.max(0.001, positionScale - previousPositionScale)
+	local clone = questKillBarSegmentTemplate:Clone()
+	clone.Name = `Segment_{milestone.Kills}`
+	clone.Visible = true
+	clone:SetAttribute(QUEST_SEGMENT_CLONE_ATTRIBUTE, true)
+	clone.AnchorPoint = Vector2.new(1, clone.AnchorPoint.Y)
+	clone.Position = UDim2.fromScale(positionScale, clone.Position.Y.Scale)
+	clone.Size = UDim2.fromScale(segmentWidthScale, clone.Size.Y.Scale)
+	clone.Parent = questKillBar
+
+	local title = findTextLabel(clone, "Title")
+	if title ~= nil then
+		title.Text = tostring(milestone.Kills)
 	end
 end
 
 local function renderQuests()
 	clearQuestClones()
 	clearRewardItemClones()
+	clearKillBarSegmentClones()
 
 	if currentSnapshot == nil then
 		return
@@ -421,22 +515,32 @@ local function renderQuests()
 	for index, quest in currentSnapshot.quests do
 		renderQuest(quest, index)
 
-		if killQuest == nil and isKillQuest(quest) then
+		if killQuest == nil and getDailyKillDefinition(quest) ~= nil then
 			killQuest = quest
 		end
 	end
 
 	if killQuest ~= nil then
 		local quest = killQuest :: QuestSnapshotEntry
-		local percentage = getDailyKillPercentage(quest)
+		local milestones = getKillMilestones(quest)
+		if milestones == nil then
+			return
+		end
+
+		local percentage = getDailyKillPercentage(quest, milestones)
 
 		if questKillBarFill ~= nil then
 			questKillBarFill.Size = UDim2.fromScale(percentage, questKillBarFill.Size.Y.Scale)
-			log(`QUEST_KILL_BAR_FILL updated by daily kills {quest.progress}/{DAILY_KILL_TARGET} = {percentage}`)
+			log(
+				`QUEST_KILL_BAR_FILL updated by daily kills {quest.progress}/{getMilestoneTarget(milestones)} = {percentage}`
+			)
 		end
 
-		for _, milestone in KILL_REWARD_MILESTONES do
-			renderRewardMilestone(quest, milestone)
+		local previousPositionScale = 0
+		for _, milestone in milestones do
+			renderKillBarSegment(milestone, milestones, previousPositionScale)
+			renderRewardMilestone(quest, milestone, milestones)
+			previousPositionScale = getMilestonePositionScale(milestone, milestones)
 		end
 	elseif questKillBarFill ~= nil then
 		questKillBarFill.Size = UDim2.fromScale(0, questKillBarFill.Size.Y.Scale)
@@ -489,7 +593,22 @@ local function updateTimer()
 end
 
 function QuestController:GetReferences()
+	if isResolvingReferences then
+		return
+	end
+
+	isResolvingReferences = true
+	referencesReady = false
+
 	log("GetReferences called")
+
+	questContainer = nil
+	questTimer = nil
+	questTemplate = nil
+	questKillBar = nil
+	questKillBarFill = nil
+	questKillBarSegmentTemplate = nil
+	questRewardItems = nil
 
 	questContainer = getTaggedInstance(QUEST_SCROLLING_FRAME_TAG) :: GuiObject?
 	questTimer = getTaggedInstance(QUEST_TIMER_TAG) :: TextLabel?
@@ -525,8 +644,43 @@ function QuestController:GetReferences()
 		questKillBarFill = nil
 	end
 
+	if questKillBarFill ~= nil then
+		local filling = questKillBarFill.Parent
+		local bar = if filling ~= nil then filling.Parent else nil
+
+		if bar ~= nil and bar:IsA("Frame") then
+			questKillBar = bar
+			local segmentTemplate = bar:FindFirstChild(SEGMENT_TEMPLATE_NAME)
+
+			if segmentTemplate ~= nil and segmentTemplate:IsA("Frame") then
+				questKillBarSegmentTemplate = segmentTemplate
+				questKillBarSegmentTemplate.Visible = false
+			else
+				warn(`[QuestController] missing {SEGMENT_TEMPLATE_NAME} inside {bar:GetFullName()}`)
+			end
+
+			for _, child in bar:GetChildren() do
+				if string.match(child.Name, "^Bar%d+$") and child:IsA("GuiObject") then
+					child.Visible = false
+				end
+			end
+		end
+	end
+
 	if questRewardItems ~= nil and not questRewardItems:IsA("Frame") then
 		questRewardItems = nil
+	end
+
+	referencesReady = questContainer ~= nil
+		and questTemplate ~= nil
+		and questTimer ~= nil
+		and questKillBarFill ~= nil
+		and questRewardItems ~= nil
+	isResolvingReferences = false
+
+	if referencesReady and currentSnapshot ~= nil then
+		renderQuests()
+		updateTimer()
 	end
 end
 
@@ -551,8 +705,6 @@ function QuestController:Start()
 
 	log("Start")
 
-	self:GetReferences()
-
 	table.insert(
 		connections,
 		questUpdatedRemote.OnClientEvent:Connect(function(payload)
@@ -570,10 +722,36 @@ function QuestController:Start()
 
 			currentSnapshot = snapshot :: QuestSnapshot
 
+			if not referencesReady then
+				task.spawn(function()
+					self:GetReferences()
+				end)
+				return
+			end
+
 			renderQuests()
 			updateTimer()
 		end)
 	)
+
+	for _, tag in { QUEST_SCROLLING_FRAME_TAG, QUEST_TIMER_TAG, QUEST_KILL_BAR_FILL_TAG, QUEST_REWARD_ITEMS_TAG } do
+		table.insert(
+			connections,
+			CollectionService:GetInstanceAddedSignal(tag):Connect(function(instance)
+				task.defer(function()
+					if not instance:IsDescendantOf(Workspace) then
+						return
+					end
+
+					self:GetReferences()
+				end)
+			end)
+		)
+	end
+
+	task.spawn(function()
+		self:GetReferences()
+	end)
 
 	table.insert(
 		connections,
