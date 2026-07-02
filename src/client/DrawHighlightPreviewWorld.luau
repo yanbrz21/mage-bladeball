@@ -33,6 +33,8 @@ local previewConnections: { RBXScriptConnection } = {}
 local hiddenParts: { [BasePart]: number } = {}
 local disabledEffects: { [Instance]: boolean } = {}
 local previewGeneration = 0
+local activeLayoutOptions: LayoutOptions?
+local activeOrbitAngle = 0
 
 local function disconnectConnections()
 	for _, connection in previewConnections do
@@ -327,30 +329,37 @@ local function updateDimPlane(camera: Camera, distance: number)
 	plane.CFrame = camera.CFrame * CFrame.new(0, 0, -distance)
 end
 
+local function applyLayoutNow(layoutOptions: LayoutOptions, orbitAngle: number)
+	local camera = getCurrentCamera()
+	if camera == nil then
+		return
+	end
+
+	local distance = layoutOptions.distance or DEFAULT_PREVIEW_DISTANCE
+	updateDimPlane(camera, distance + DIM_PLANE_EXTRA_DISTANCE)
+
+	local baseCFrame = getPreviewBaseCFrame(camera, layoutOptions, orbitAngle, distance)
+	for _, item in previewItems do
+		if item.instance.Parent ~= nil then
+			pivotInstance(item.instance, baseCFrame * item.localCFrame)
+		end
+	end
+end
+
 local function startLayoutLoop(layoutOptions: LayoutOptions)
 	local orbitAngle = 0
+	activeLayoutOptions = layoutOptions
+	activeOrbitAngle = orbitAngle
 
 	table.insert(
 		previewConnections,
 		RunService.RenderStepped:Connect(function(deltaTime: number)
-			local camera = getCurrentCamera()
-			if camera == nil then
-				return
-			end
-
-			local distance = layoutOptions.distance or DEFAULT_PREVIEW_DISTANCE
-			updateDimPlane(camera, distance + DIM_PLANE_EXTRA_DISTANCE)
-
 			if layoutOptions.orbitSpeed ~= nil then
 				orbitAngle += deltaTime * layoutOptions.orbitSpeed
 			end
 
-			local baseCFrame = getPreviewBaseCFrame(camera, layoutOptions, orbitAngle, distance)
-			for _, item in previewItems do
-				if item.instance.Parent ~= nil then
-					pivotInstance(item.instance, baseCFrame * item.localCFrame)
-				end
-			end
+			activeOrbitAngle = orbitAngle
+			applyLayoutNow(layoutOptions, orbitAngle)
 		end)
 	)
 end
@@ -393,6 +402,8 @@ function DrawHighlightPreviewWorld.Clear()
 	disconnectConnections()
 	restoreWorldOcclusion()
 	table.clear(previewItems)
+	activeLayoutOptions = nil
+	activeOrbitAngle = 0
 
 	if previewWorld ~= nil then
 		previewWorld:Destroy()
@@ -467,6 +478,26 @@ function DrawHighlightPreviewWorld.CloneResource(
 	return clone
 end
 
+function DrawHighlightPreviewWorld.CreateAnchor(name: string, localCFrame: CFrame): BasePart?
+	if previewWorld == nil then
+		return nil
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = name
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanTouch = false
+	anchor.CanQuery = false
+	anchor.CastShadow = false
+	anchor.Massless = true
+	anchor.Transparency = 1
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.Parent = previewWorld
+	addPreviewItem(anchor, localCFrame)
+	return anchor
+end
+
 function DrawHighlightPreviewWorld.PlayParticlePlaybackLoop(root: Instance, minimumCycleSeconds: number)
 	local generation = previewGeneration
 	task.spawn(function()
@@ -488,6 +519,15 @@ function DrawHighlightPreviewWorld.SetItemLocalCFrame(instance: Instance, localC
 			return
 		end
 	end
+end
+
+function DrawHighlightPreviewWorld.FlushLayout()
+	local layoutOptions = activeLayoutOptions
+	if layoutOptions == nil then
+		return
+	end
+
+	applyLayoutNow(layoutOptions, activeOrbitAngle)
 end
 
 return DrawHighlightPreviewWorld
