@@ -10,21 +10,58 @@ local Config = Shared:WaitForChild("Config")
 local CombatConfig = require(Config:WaitForChild("CombatConfig"))
 local DrawHighlightPreviewSupport = require(script.Parent:WaitForChild("DrawHighlightPreviewSupport"))
 local DrawHighlightPreviewWorld = require(script.Parent:WaitForChild("DrawHighlightPreviewWorld"))
+local PlayerAnimationConfig = require(Config:WaitForChild("PlayerAnimationConfig"))
 
 local DrawHighlightWeaponSkinPreviewRenderers = {}
 
 local EXPLOSION_REFERENCE_VISUAL_DIAMETER_STUDS = 140
 local EXPLOSION_VISUAL_SCALE_MULTIPLIER = 2
+local ABSOLUTE_ZERO_CHARGE_SECONDS = 4
+local ABSOLUTE_ZERO_PROJECTILE_SECONDS = 2
+local ABSOLUTE_ZERO_PLAYER_LOCAL_X = -5.45
+local FIREBALL_CAST_HOLD_TIME_SECONDS = 0.3
 
 local previewConnections: { RBXScriptConnection } = {}
 local previewGeneration = 0
 local localPlayer = Players.LocalPlayer
 local playerScripts = localPlayer:WaitForChild("PlayerScripts")
+local AnimationManager: any =
+	require(playerScripts:WaitForChild("ClientPackages"):WaitForChild("CommonKit"):WaitForChild("AnimationManager"))
 local VFXSystem: any =
 	require(playerScripts:WaitForChild("ClientPackages"):WaitForChild("CommonKit"):WaitForChild("VFXSystem"))
+local FireballChargeVFX = require(
+	playerScripts
+		:WaitForChild("Client")
+		:WaitForChild("Effects")
+		:WaitForChild("CombatVFX")
+		:WaitForChild("FireballChargeVFX")
+)
+
+local PreviewFireballChargeVFX: any = {
+	_heldFireballCast = nil,
+	_remoteHeldFireballCastsByUserId = {},
+	_remoteFireballChargeStartedAtByUserId = {},
+}
+
+function PreviewFireballChargeVFX:_getCharacterRootPart(character: Model?): BasePart?
+	local targetCharacter = character
+	if targetCharacter == nil then
+		return nil
+	end
+
+	local rootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
+	return if rootPart ~= nil and rootPart:IsA("BasePart") then rootPart else nil
+end
+
+function PreviewFireballChargeVFX:_resolveEffectByPath(effectPath: string): Instance?
+	return DrawHighlightPreviewSupport.ResolveEffectPath(effectPath)
+end
+
+FireballChargeVFX.Install(PreviewFireballChargeVFX, VFXSystem)
 
 function DrawHighlightWeaponSkinPreviewRenderers.Clear()
 	previewGeneration += 1
+	PreviewFireballChargeVFX:CancelHeldFireballCast()
 	for _, connection in previewConnections do
 		connection:Disconnect()
 	end
@@ -50,6 +87,59 @@ local function getFireballEffectField(itemId: string, fieldName: string): string
 	local fireballConfig = DrawHighlightPreviewSupport.GetSkinFireballConfig(itemId)
 	local value = if type(fireballConfig) == "table" then fireballConfig[fieldName] else nil
 	return if type(value) == "string" then value else nil
+end
+
+local function getDefaultFireballCastAnimationEntry(): any?
+	local characterSet = PlayerAnimationConfig.CharacterSets[PlayerAnimationConfig.DefaultCharacterSetId]
+	if type(characterSet) ~= "table" then
+		return nil
+	end
+
+	local actions = characterSet.Actions
+	if type(actions) ~= "table" then
+		return nil
+	end
+
+	return actions[PlayerAnimationConfig.ActionKeys.FireballCast]
+end
+
+local function playFireballCastAnimation(playerPreview: Instance?, startTime: number?, pauseAtHold: boolean)
+	if playerPreview == nil or not playerPreview:IsA("Model") then
+		return nil
+	end
+
+	local entry = getDefaultFireballCastAnimationEntry()
+	local animationId = if type(entry) == "table" then entry.AnimationId else nil
+	if type(animationId) ~= "string" or animationId == "" then
+		warn("[DrawController] missing FireballCast animation for Absolute Zero highlight preview")
+		return nil
+	end
+
+	local track = AnimationManager.PlayByAssetId(playerPreview, animationId, {
+		fadeTime = entry.FadeTime or 0.05,
+		weight = entry.Weight or 1,
+		speed = entry.Speed or 1,
+		looped = false,
+		force = true,
+		priority = entry.Priority or Enum.AnimationPriority.Action,
+	})
+	if track == nil then
+		return nil
+	end
+
+	if type(startTime) == "number" and startTime > 0 then
+		track.TimePosition = startTime
+	end
+	if pauseAtHold then
+		task.delay(FIREBALL_CAST_HOLD_TIME_SECONDS, function()
+			if track.IsPlaying then
+				track.TimePosition = FIREBALL_CAST_HOLD_TIME_SECONDS
+				track:AdjustSpeed(0)
+			end
+		end)
+	end
+
+	return track
 end
 
 local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?)
@@ -81,19 +171,54 @@ local function playPersistentAtAnchor(path: string, anchor: BasePart, scale: num
 	})
 end
 
-local function addMovingAnchorLoop(anchor: BasePart, cycleSeconds: number, getFrame: (number) -> CFrame)
-	local elapsed = 0
-	table.insert(
-		previewConnections,
-		RunService.RenderStepped:Connect(function(deltaTime: number)
-			if anchor.Parent == nil then
-				return
-			end
+local function waitForEffectRemoved(effect: Instance?, generation: number)
+	while generation == previewGeneration and effect ~= nil and effect.Parent ~= nil do
+		task.wait()
+	end
+end
 
-			elapsed = (elapsed + deltaTime) % cycleSeconds
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(anchor, getFrame(elapsed / cycleSeconds))
-		end)
-	)
+local function getLookFrame(position: Vector3, direction: Vector3): CFrame
+	if direction.Magnitude <= 0 then
+		return CFrame.new(position)
+	end
+
+	return CFrame.lookAt(position, position + direction.Unit)
+end
+
+local function getFireballTier(tierName: string): any
+	for _, tier in CombatConfig.Fireball.Charge.Tiers do
+		if tier.Name == tierName then
+			return tier
+		end
+	end
+
+	error(`[DrawController] Fireball charge tier {tierName} is missing`)
+end
+
+local function getNonNegativeNumber(value: any, message: string): number
+	if type(value) ~= "number" or value < 0 then
+		error(`[DrawController] {message}`)
+	end
+
+	return value
+end
+
+local function moveAnchorOverDuration(
+	anchor: BasePart,
+	fromCFrame: CFrame,
+	toCFrame: CFrame,
+	durationSeconds: number,
+	generation: number
+): boolean
+	local elapsed = 0
+	while generation == previewGeneration and anchor:IsDescendantOf(game) and elapsed < durationSeconds do
+		local deltaTime = RunService.RenderStepped:Wait()
+		elapsed += deltaTime
+		local alpha = math.clamp(elapsed / durationSeconds, 0, 1)
+		DrawHighlightPreviewWorld.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
+	end
+
+	return generation == previewGeneration and anchor:IsDescendantOf(game)
 end
 
 function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
@@ -116,43 +241,42 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
 
 	local projectilePath = getFireballPath("football_shoes", "Fast") or getFireballPath("football_shoes", "Heavy")
 	local explosionPath = getFireballEffectField("football_shoes", "ExplosionEffectPath")
-	local projectileAnchor = DrawHighlightPreviewWorld.CreateAnchor(
-		"FootballProjectileAnchor",
-		CFrame.lookAt(Vector3.new(0.4, 0.55, -0.15), Vector3.new(1.4, 0.55, -0.15))
-	)
-	local explosionAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("FootballExplosionAnchor", CFrame.new(2.35, -0.45, -0.45))
+	local projectileFrame = CFrame.lookAt(Vector3.new(1.45, 0.08, -0.32), Vector3.new(2.45, 0.08, -0.32))
+	local projectileAnchor = DrawHighlightPreviewWorld.CreateAnchor("FootballProjectileAnchor", projectileFrame)
+	local explosionAnchor = DrawHighlightPreviewWorld.CreateAnchor("FootballExplosionAnchor", projectileFrame)
 	if projectileAnchor == nil or explosionAnchor == nil then
 		return
 	end
 
-	if type(projectilePath) == "string" then
-		playPersistentAtAnchor(projectilePath, projectileAnchor, 0.78, true)
-	end
-
 	local generation = previewGeneration
 	local cycleSeconds = 2.9
-	addMovingAnchorLoop(projectileAnchor, cycleSeconds, function(alpha: number): CFrame
-		if alpha < 0.62 then
-			local travelAlpha = alpha / 0.62
-			local position =
-				Vector3.new(0.25 + 2.05 * travelAlpha, 0.55 - 0.85 * travelAlpha, -0.15 - 0.35 * travelAlpha)
-			return CFrame.lookAt(position, position + Vector3.new(1, -0.2, -0.08))
-		end
-
-		return CFrame.new(2.3, -0.3, -0.5)
-	end)
-
 	task.spawn(function()
 		while generation == previewGeneration and projectileAnchor:IsDescendantOf(game) do
-			task.wait(cycleSeconds * 0.62)
+			local projectileEffect: Instance? = nil
+			if type(projectilePath) == "string" then
+				DrawHighlightPreviewWorld.FlushLayout()
+				projectileEffect = playPersistentAtAnchor(projectilePath, projectileAnchor, 0.78, true)
+			end
+
+			task.wait(cycleSeconds)
 			if generation ~= previewGeneration or not projectileAnchor:IsDescendantOf(game) then
 				return
 			end
-			if type(explosionPath) == "string" then
-				playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale())
+
+			if projectileEffect ~= nil and type(projectilePath) == "string" then
+				VFXSystem.Stop(projectileAnchor, projectilePath)
 			end
-			task.wait(cycleSeconds * 0.38)
+
+			local explosionEffect: Instance? = nil
+			if type(explosionPath) == "string" then
+				explosionEffect = playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale())
+			end
+			waitForEffectRemoved(explosionEffect, generation)
+
+			if generation ~= previewGeneration or not projectileAnchor:IsDescendantOf(game) then
+				return
+			end
+			task.wait(0.5)
 		end
 	end)
 end
@@ -160,108 +284,131 @@ end
 function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 	if
 		not DrawHighlightPreviewWorld.Begin({
-			distance = 55,
-			offset = Vector3.new(0, -2.2, 0),
+			distance = 30,
+			offset = Vector3.new(0, -2.15, 0),
 			screenOffset = Vector2.new(0, 0.08),
-			rotation = CFrame.Angles(math.rad(-5), math.rad(-10), 0),
+			rotation = CFrame.Angles(math.rad(-5), math.rad(10), 0),
 		})
 	then
 		return
 	end
 
 	local fallbackSize = DrawHighlightPreviewSupport.GetPlayerSizeFallback()
+	local playerDirection = Vector3.new(1, 0, -0.28).Unit
+	local playerPosition = Vector3.new(ABSOLUTE_ZERO_PLAYER_LOCAL_X, fallbackSize.Y * 0.5, 0)
 	local player = DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 		"AbsoluteZeroPlayerPreview",
 		0,
-		CFrame.new(-1.55, fallbackSize.Y * 0.5, 0) * CFrame.Angles(0, math.rad(-16), 0)
+		getLookFrame(playerPosition, playerDirection)
 	)
 	if player == nil then
 		return
 	end
 
 	local playerSize = DrawHighlightPreviewSupport.GetCharacterSize(player)
-	DrawHighlightPreviewWorld.SetItemLocalCFrame(
-		player,
-		CFrame.new(-1.55, playerSize.Y * 0.5, 0) * CFrame.Angles(0, math.rad(-16), 0)
-	)
+	playerPosition = Vector3.new(ABSOLUTE_ZERO_PLAYER_LOCAL_X, playerSize.Y * 0.5, 0)
+	DrawHighlightPreviewWorld.SetItemLocalCFrame(player, getLookFrame(playerPosition, playerDirection))
 	DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 		"absolute_zero",
 		player,
-		CFrame.new(1.35, playerSize.Y * 0.3, -1.1) * CFrame.Angles(0, math.rad(-28), math.rad(12))
+		CFrame.new(0.85, playerSize.Y * 0.32, -1.05) * CFrame.Angles(0, math.rad(-28), math.rad(12))
 	)
 
-	local chargePath = getFireballEffectField("absolute_zero", "ChargeEffectPath")
-	local projectilePath = getFireballPath("absolute_zero", "Heavy") or getFireballPath("absolute_zero", "Fast")
-	local explosionPath = getFireballEffectField("absolute_zero", "HeavyExplosionEffectPath")
-		or getFireballEffectField("absolute_zero", "ExplosionEffectPath")
-	local chargeAnchor = DrawHighlightPreviewWorld.CreateAnchor(
-		"AbsoluteZeroChargeAnchor",
-		CFrame.lookAt(Vector3.new(0.35, playerSize.Y * 0.62, -1.45), Vector3.new(1.1, playerSize.Y * 0.6, -2.2))
+	local projectilePath = getFireballPath("absolute_zero", "Fast")
+	local explosionPath = getFireballEffectField("absolute_zero", "ExplosionEffectPath")
+	local fastTier = getFireballTier("Fast")
+	local projectileScale = DrawHighlightPreviewSupport.GetPositiveNumber(
+		fastTier.SizeMultiplier,
+		"Fast fireball size multiplier must be positive"
 	)
-	local projectileAnchor = DrawHighlightPreviewWorld.CreateAnchor(
-		"AbsoluteZeroProjectileAnchor",
-		CFrame.lookAt(Vector3.new(0.35, playerSize.Y * 0.62, -1.45), Vector3.new(1.1, playerSize.Y * 0.6, -2.2))
+	local spawnForwardOffset = DrawHighlightPreviewSupport.GetPositiveNumber(
+		CombatConfig.Fireball.SpawnForwardOffset,
+		"Fireball spawn forward offset must be positive"
 	)
-	local explosionAnchor = DrawHighlightPreviewWorld.CreateAnchor(
-		"AbsoluteZeroExplosionAnchor",
-		CFrame.new(3.1, playerSize.Y * 0.22, -2.65)
+	local spawnHeightOffset = getNonNegativeNumber(
+		CombatConfig.Fireball.SpawnHeightOffset,
+		"Fireball spawn height offset must be non-negative"
 	)
-	if chargeAnchor == nil or projectileAnchor == nil or explosionAnchor == nil then
+	local projectileStart = playerPosition + Vector3.new(0, spawnHeightOffset, 0) + playerDirection * spawnForwardOffset
+	local projectileEnd = projectileStart + playerDirection * 6.4
+	local projectileStartFrame = getLookFrame(projectileStart, playerDirection)
+	local projectileEndFrame = getLookFrame(projectileEnd, playerDirection)
+	local projectileAnchor =
+		DrawHighlightPreviewWorld.CreateAnchor("AbsoluteZeroProjectileAnchor", projectileStartFrame)
+	local explosionAnchor = DrawHighlightPreviewWorld.CreateAnchor("AbsoluteZeroExplosionAnchor", projectileEndFrame)
+	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+	if projectileAnchor == nil or explosionAnchor == nil or previewWorld == nil or not player:IsA("Model") then
 		return
 	end
 
 	local generation = previewGeneration
 	task.spawn(function()
-		while generation == previewGeneration and chargeAnchor:IsDescendantOf(game) do
-			local chargeEffect: Instance? = nil
-			if type(chargePath) == "string" then
-				chargeEffect = playPersistentAtAnchor(chargePath, chargeAnchor, 0.55, true)
-			end
-			task.wait(1.25)
+		while generation == previewGeneration and projectileAnchor:IsDescendantOf(game) do
+			playFireballCastAnimation(player, nil, true)
 
-			if generation ~= previewGeneration or not chargeAnchor:IsDescendantOf(game) then
+			local vfxOptions = {
+				parent = previewWorld,
+				weaponSkinId = "absolute_zero",
+			}
+			PreviewFireballChargeVFX:StartHeldFireballCast(player, playerDirection, vfxOptions)
+			local chargeElapsed = 0
+			local completedStageCount = 0
+			while
+				generation == previewGeneration
+				and projectileAnchor:IsDescendantOf(game)
+				and chargeElapsed < ABSOLUTE_ZERO_CHARGE_SECONDS
+			do
+				local deltaTime = RunService.RenderStepped:Wait()
+				chargeElapsed = math.min(chargeElapsed + deltaTime, ABSOLUTE_ZERO_CHARGE_SECONDS)
+				PreviewFireballChargeVFX:UpdateHeldFireballCast(player, playerDirection, chargeElapsed)
+				if chargeElapsed >= 1 and completedStageCount < 1 then
+					completedStageCount = 1
+					PreviewFireballChargeVFX:PlayFireballChargeStep(player, playerDirection, vfxOptions)
+				end
+				if chargeElapsed >= 3 and completedStageCount < 2 then
+					completedStageCount = 2
+					PreviewFireballChargeVFX:PlayFireballChargeStep(player, playerDirection, vfxOptions)
+				end
+			end
+
+			if generation ~= previewGeneration or not projectileAnchor:IsDescendantOf(game) then
 				return
 			end
-			if chargeEffect ~= nil and type(chargePath) == "string" then
-				VFXSystem.Stop(chargeAnchor, chargePath)
-			end
+
+			playFireballCastAnimation(player, FIREBALL_CAST_HOLD_TIME_SECONDS, false)
+			PreviewFireballChargeVFX:ReleaseHeldFireballCast(player, playerDirection, vfxOptions)
+
+			DrawHighlightPreviewWorld.SetItemLocalCFrame(projectileAnchor, projectileStartFrame)
+			DrawHighlightPreviewWorld.FlushLayout()
 			local projectileEffect: Instance? = nil
 			if type(projectilePath) == "string" then
-				projectileEffect = playPersistentAtAnchor(projectilePath, projectileAnchor, 0.85, true)
+				projectileEffect = playPersistentAtAnchor(projectilePath, projectileAnchor, projectileScale, true)
 			end
-
-			task.wait(0.85)
-			if generation ~= previewGeneration or not projectileAnchor:IsDescendantOf(game) then
+			if
+				not moveAnchorOverDuration(
+					projectileAnchor,
+					projectileStartFrame,
+					projectileEndFrame,
+					ABSOLUTE_ZERO_PROJECTILE_SECONDS,
+					generation
+				)
+			then
 				return
 			end
 			if projectileEffect ~= nil and type(projectilePath) == "string" then
 				VFXSystem.Stop(projectileAnchor, projectilePath)
 			end
+			local explosionEffect: Instance? = nil
 			if type(explosionPath) == "string" then
-				playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale())
+				explosionEffect = playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale())
 			end
+			waitForEffectRemoved(explosionEffect, generation)
 
-			task.wait(1.8)
+			if generation ~= previewGeneration or not projectileAnchor:IsDescendantOf(game) then
+				return
+			end
+			task.wait(0.5)
 		end
-	end)
-
-	addMovingAnchorLoop(projectileAnchor, 3.9, function(alpha: number): CFrame
-		if alpha < 0.32 then
-			return CFrame.lookAt(
-				Vector3.new(0.35, playerSize.Y * 0.62, -1.45),
-				Vector3.new(1.1, playerSize.Y * 0.6, -2.2)
-			)
-		elseif alpha < 0.54 then
-			local travelAlpha = (alpha - 0.32) / 0.22
-			local position = Vector3.new(
-				0.35 + 2.75 * travelAlpha,
-				playerSize.Y * (0.62 - 0.4 * travelAlpha),
-				-1.45 - 1.2 * travelAlpha
-			)
-			return CFrame.lookAt(position, position + Vector3.new(1, -0.12, -0.35))
-		end
-
-		return CFrame.new(3.1, playerSize.Y * 0.22, -2.65)
 	end)
 end
 

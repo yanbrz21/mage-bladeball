@@ -261,7 +261,7 @@ end
 function DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 	itemId: string,
 	character: Instance,
-	fallbackLocalCFrame: CFrame
+	_fallbackLocalCFrame: CFrame
 ): Instance?
 	DrawHighlightPreviewCharacterSetup.RemovePreviewWeapon(character)
 
@@ -282,6 +282,13 @@ function DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 	weapon.Name = `Weapon_{itemId}`
 	DrawHighlightPreviewCharacterSetup.SetWeaponPartProperties(weapon)
 
+	local rightHand = character:FindFirstChild("RightHand")
+	if rightHand == nil or not rightHand:IsA("BasePart") then
+		weapon:Destroy()
+		warn("[DrawController] preview character has no R15 RightHand for weapon grip")
+		return nil
+	end
+
 	local gripPart = DrawHighlightPreviewCharacterSetup.FindGripPart(weapon)
 	if gripPart == nil then
 		weapon:Destroy()
@@ -296,41 +303,30 @@ function DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 
 	local handAttachmentName = if type(skinConfig) == "table" then skinConfig.HandAttachmentName else nil
 	local gripAttachmentName = if type(skinConfig) == "table" then skinConfig.GripAttachmentName else nil
-	local handAttachment = if type(handAttachmentName) == "string"
-		then character:FindFirstChild(handAttachmentName, true)
-		else nil
+	local handAttachment = DrawHighlightPreviewCharacterSetup.FindAttachment(rightHand, handAttachmentName)
 	local gripAttachment = if type(gripAttachmentName) == "string"
 		then weapon:FindFirstChild(gripAttachmentName, true)
 		else nil
+	local targetCFrame = rightHand.CFrame
 
-	if
-		handAttachment ~= nil
-		and handAttachment:IsA("Attachment")
-		and gripAttachment ~= nil
-		and gripAttachment:IsA("Attachment")
-	then
-		local targetCFrame = handAttachment.WorldCFrame * gripAttachment.CFrame:Inverse()
-		DrawHighlightPreviewCharacterSetup.PivotInstanceToPartCFrame(weapon, gripPart, targetCFrame)
+	if handAttachment ~= nil and gripAttachment ~= nil and gripAttachment:IsA("Attachment") then
+		targetCFrame = handAttachment.WorldCFrame * gripAttachment.CFrame:Inverse()
+	elseif handAttachment ~= nil and weapon:IsA("Tool") then
+		targetCFrame = handAttachment.WorldCFrame * weapon.Grip
+		warn(`[DrawController] weapon skin {itemId} grip attachment missing; using Tool.Grip alignment`)
+	elseif handAttachment ~= nil then
+		targetCFrame = handAttachment.WorldCFrame
+		warn(`[DrawController] weapon skin {itemId} grip attachment missing; using hand attachment alignment`)
 	else
-		warn(`[DrawController] weapon skin {itemId} attachment missing; using preview fallback placement`)
-		local characterPivot = if character:IsA("Model") then character:GetPivot() else CFrame.new()
-		if weapon:IsA("Model") then
-			weapon:PivotTo(characterPivot * fallbackLocalCFrame)
-		elseif weapon:IsA("BasePart") then
-			weapon.CFrame = characterPivot * fallbackLocalCFrame
-		end
+		warn(`[DrawController] weapon skin {itemId} hand attachment missing; using RightHand alignment`)
 	end
+	DrawHighlightPreviewCharacterSetup.PivotInstanceToPartCFrame(weapon, gripPart, targetCFrame)
 
-	local handPart: Instance? = if handAttachment ~= nil and handAttachment:IsA("Attachment")
-		then handAttachment.Parent
-		else nil
-	if handPart ~= nil and handPart:IsA("BasePart") then
-		local weld = Instance.new("WeldConstraint")
-		weld.Name = "WeaponGripWeld"
-		weld.Part0 = handPart
-		weld.Part1 = gripPart
-		weld.Parent = gripPart
-	end
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "WeaponGripWeld"
+	weld.Part0 = rightHand
+	weld.Part1 = gripPart
+	weld.Parent = gripPart
 
 	return weapon
 end
