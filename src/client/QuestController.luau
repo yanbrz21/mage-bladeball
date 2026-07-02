@@ -511,13 +511,16 @@ local function renderQuests()
 	end
 
 	local killQuest: QuestSnapshotEntry? = nil
+	local layoutOrder = 0
 
-	for index, quest in currentSnapshot.quests do
-		renderQuest(quest, index)
-
-		if killQuest == nil and getDailyKillDefinition(quest) ~= nil then
+	for _, quest in currentSnapshot.quests do
+		if getDailyKillDefinition(quest) ~= nil then
 			killQuest = quest
+			continue
 		end
+
+		layoutOrder += 1
+		renderQuest(quest, layoutOrder)
 	end
 
 	if killQuest ~= nil then
