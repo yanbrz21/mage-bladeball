@@ -27,8 +27,6 @@ local localPlayer = Players.LocalPlayer
 local playerScripts = localPlayer:WaitForChild("PlayerScripts")
 local AnimationManager: any =
 	require(playerScripts:WaitForChild("ClientPackages"):WaitForChild("CommonKit"):WaitForChild("AnimationManager"))
-local VFXSystem: any =
-	require(playerScripts:WaitForChild("ClientPackages"):WaitForChild("CommonKit"):WaitForChild("VFXSystem"))
 local FireballChargeVFX = require(
 	playerScripts
 		:WaitForChild("Client")
@@ -36,6 +34,8 @@ local FireballChargeVFX = require(
 		:WaitForChild("CombatVFX")
 		:WaitForChild("FireballChargeVFX")
 )
+local VFXSystem: any =
+	require(playerScripts:WaitForChild("ClientPackages"):WaitForChild("CommonKit"):WaitForChild("VFXSystem"))
 
 local PreviewFireballChargeVFX: any = {
 	_heldFireballCast = nil,
@@ -142,8 +142,8 @@ local function playFireballCastAnimation(playerPreview: Instance?, startTime: nu
 	return track
 end
 
-local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?, previewRuntime: any)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return nil
 	end
@@ -156,8 +156,14 @@ local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: numbe
 	})
 end
 
-local function playPersistentAtAnchor(path: string, anchor: BasePart, scale: number?, initialEmitFromRate: boolean?)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playPersistentAtAnchor(
+	path: string,
+	anchor: BasePart,
+	scale: number?,
+	initialEmitFromRate: boolean?,
+	previewRuntime: any
+)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return nil
 	end
@@ -208,22 +214,24 @@ local function moveAnchorOverDuration(
 	fromCFrame: CFrame,
 	toCFrame: CFrame,
 	durationSeconds: number,
-	generation: number
+	generation: number,
+	previewRuntime: any
 ): boolean
 	local elapsed = 0
 	while generation == previewGeneration and anchor:IsDescendantOf(game) and elapsed < durationSeconds do
 		local deltaTime = RunService.RenderStepped:Wait()
 		elapsed += deltaTime
 		local alpha = math.clamp(elapsed / durationSeconds, 0, 1)
-		DrawHighlightPreviewWorld.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
+		previewRuntime.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
 	end
 
 	return generation == previewGeneration and anchor:IsDescendantOf(game)
 end
 
-function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
+function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes(previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
 	if
-		not DrawHighlightPreviewWorld.Begin({
+		not runtime.Begin({
 			distance = 43,
 			offset = Vector3.new(0, -1.5, 0),
 			screenOffset = Vector2.new(0, 0.04),
@@ -236,14 +244,15 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
 
 	DrawHighlightPreviewSupport.CloneWeaponSkinModel(
 		"football_shoes",
-		CFrame.new(-1.65, 0.65, 0) * CFrame.Angles(0, math.rad(-38), math.rad(12))
+		CFrame.new(-1.65, 0.65, 0) * CFrame.Angles(0, math.rad(-38), math.rad(12)),
+		runtime
 	)
 
 	local projectilePath = getFireballPath("football_shoes", "Fast") or getFireballPath("football_shoes", "Heavy")
 	local explosionPath = getFireballEffectField("football_shoes", "ExplosionEffectPath")
 	local projectileFrame = CFrame.lookAt(Vector3.new(1.45, 0.08, -0.32), Vector3.new(2.45, 0.08, -0.32))
-	local projectileAnchor = DrawHighlightPreviewWorld.CreateAnchor("FootballProjectileAnchor", projectileFrame)
-	local explosionAnchor = DrawHighlightPreviewWorld.CreateAnchor("FootballExplosionAnchor", projectileFrame)
+	local projectileAnchor = runtime.CreateAnchor("FootballProjectileAnchor", projectileFrame)
+	local explosionAnchor = runtime.CreateAnchor("FootballExplosionAnchor", projectileFrame)
 	if projectileAnchor == nil or explosionAnchor == nil then
 		return
 	end
@@ -254,8 +263,8 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
 		while generation == previewGeneration and projectileAnchor:IsDescendantOf(game) do
 			local projectileEffect: Instance? = nil
 			if type(projectilePath) == "string" then
-				DrawHighlightPreviewWorld.FlushLayout()
-				projectileEffect = playPersistentAtAnchor(projectilePath, projectileAnchor, 0.78, true)
+				runtime.FlushLayout()
+				projectileEffect = playPersistentAtAnchor(projectilePath, projectileAnchor, 0.78, true, runtime)
 			end
 
 			task.wait(cycleSeconds)
@@ -269,7 +278,7 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
 
 			local explosionEffect: Instance? = nil
 			if type(explosionPath) == "string" then
-				explosionEffect = playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale())
+				explosionEffect = playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale(), runtime)
 			end
 			waitForEffectRemoved(explosionEffect, generation)
 
@@ -281,9 +290,10 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
 	end)
 end
 
-function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
+function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
 	if
-		not DrawHighlightPreviewWorld.Begin({
+		not runtime.Begin({
 			distance = 30,
 			offset = Vector3.new(0, -2.15, 0),
 			screenOffset = Vector2.new(0, 0.08),
@@ -299,7 +309,8 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 	local player = DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 		"AbsoluteZeroPlayerPreview",
 		0,
-		getLookFrame(playerPosition, playerDirection)
+		getLookFrame(playerPosition, playerDirection),
+		runtime
 	)
 	if player == nil then
 		return
@@ -307,7 +318,7 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 
 	local playerSize = DrawHighlightPreviewSupport.GetCharacterSize(player)
 	playerPosition = Vector3.new(ABSOLUTE_ZERO_PLAYER_LOCAL_X, playerSize.Y * 0.5, 0)
-	DrawHighlightPreviewWorld.SetItemLocalCFrame(player, getLookFrame(playerPosition, playerDirection))
+	runtime.SetItemLocalCFrame(player, getLookFrame(playerPosition, playerDirection))
 	DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 		"absolute_zero",
 		player,
@@ -333,10 +344,9 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 	local projectileEnd = projectileStart + playerDirection * 6.4
 	local projectileStartFrame = getLookFrame(projectileStart, playerDirection)
 	local projectileEndFrame = getLookFrame(projectileEnd, playerDirection)
-	local projectileAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("AbsoluteZeroProjectileAnchor", projectileStartFrame)
-	local explosionAnchor = DrawHighlightPreviewWorld.CreateAnchor("AbsoluteZeroExplosionAnchor", projectileEndFrame)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+	local projectileAnchor = runtime.CreateAnchor("AbsoluteZeroProjectileAnchor", projectileStartFrame)
+	local explosionAnchor = runtime.CreateAnchor("AbsoluteZeroExplosionAnchor", projectileEndFrame)
+	local previewWorld = runtime.GetWorld()
 	if projectileAnchor == nil or explosionAnchor == nil or previewWorld == nil or not player:IsA("Model") then
 		return
 	end
@@ -378,11 +388,12 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 			playFireballCastAnimation(player, FIREBALL_CAST_HOLD_TIME_SECONDS, false)
 			PreviewFireballChargeVFX:ReleaseHeldFireballCast(player, playerDirection, vfxOptions)
 
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(projectileAnchor, projectileStartFrame)
-			DrawHighlightPreviewWorld.FlushLayout()
+			runtime.SetItemLocalCFrame(projectileAnchor, projectileStartFrame)
+			runtime.FlushLayout()
 			local projectileEffect: Instance? = nil
 			if type(projectilePath) == "string" then
-				projectileEffect = playPersistentAtAnchor(projectilePath, projectileAnchor, projectileScale, true)
+				projectileEffect =
+					playPersistentAtAnchor(projectilePath, projectileAnchor, projectileScale, true, runtime)
 			end
 			if
 				not moveAnchorOverDuration(
@@ -390,7 +401,8 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 					projectileStartFrame,
 					projectileEndFrame,
 					ABSOLUTE_ZERO_PROJECTILE_SECONDS,
-					generation
+					generation,
+					runtime
 				)
 			then
 				return
@@ -400,7 +412,7 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 			end
 			local explosionEffect: Instance? = nil
 			if type(explosionPath) == "string" then
-				explosionEffect = playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale())
+				explosionEffect = playEmitOnceAtAnchor(explosionPath, explosionAnchor, getExplosionScale(), runtime)
 			end
 			waitForEffectRemoved(explosionEffect, generation)
 
@@ -412,30 +424,30 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
 	end)
 end
 
-function DrawHighlightWeaponSkinPreviewRenderers.RenderDefault(itemId: string)
-	if
-		not DrawHighlightPreviewWorld.Begin({
-			distance = 8,
-			offset = Vector3.new(0, 0.05, 0),
-			orbitSpeed = 0.18,
-		})
-	then
+function DrawHighlightWeaponSkinPreviewRenderers.RenderDefault(itemId: string, previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
+	if not runtime.Begin({
+		distance = 8,
+		offset = Vector3.new(0, 0.05, 0),
+		orbitSpeed = 0.18,
+	}) then
 		return
 	end
 
 	DrawHighlightPreviewSupport.CloneWeaponSkinModel(
 		itemId,
-		CFrame.new(0, 0.1, 0) * CFrame.Angles(0, math.rad(-30), math.rad(12))
+		CFrame.new(0, 0.1, 0) * CFrame.Angles(0, math.rad(-30), math.rad(12)),
+		runtime
 	)
 end
 
-function DrawHighlightWeaponSkinPreviewRenderers.Render(itemId: string)
+function DrawHighlightWeaponSkinPreviewRenderers.Render(itemId: string, previewRuntime: any?)
 	if itemId == "football_shoes" then
-		DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes()
+		DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes(previewRuntime)
 	elseif itemId == "absolute_zero" then
-		DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero()
+		DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRuntime)
 	else
-		DrawHighlightWeaponSkinPreviewRenderers.RenderDefault(itemId)
+		DrawHighlightWeaponSkinPreviewRenderers.RenderDefault(itemId, previewRuntime)
 	end
 end
 

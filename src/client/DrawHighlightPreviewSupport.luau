@@ -71,7 +71,8 @@ function DrawHighlightPreviewSupport.CloneEffectPath(
 	name: string,
 	localCFrame: CFrame,
 	scale: number?,
-	playParticles: boolean?
+	playParticles: boolean?,
+	previewRuntime: any?
 ): Instance?
 	local source = DrawHighlightPreviewSupport.ResolveEffectPath(path)
 	if source == nil then
@@ -79,7 +80,8 @@ function DrawHighlightPreviewSupport.CloneEffectPath(
 		return nil
 	end
 
-	return DrawHighlightPreviewWorld.CloneResource(source, name, localCFrame, scale, playParticles)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
+	return runtime.CloneResource(source, name, localCFrame, scale, playParticles)
 end
 
 function DrawHighlightPreviewSupport.GetSkinConfig(itemId: string): any?
@@ -98,7 +100,11 @@ function DrawHighlightPreviewSupport.GetSkinFireballConfig(itemId: string): any?
 	return skinConfig.Fireball
 end
 
-function DrawHighlightPreviewSupport.CloneWeaponSkinModel(itemId: string, localCFrame: CFrame): Instance?
+function DrawHighlightPreviewSupport.CloneWeaponSkinModel(
+	itemId: string,
+	localCFrame: CFrame,
+	previewRuntime: any?
+): Instance?
 	local skinConfig = DrawHighlightPreviewSupport.GetSkinConfig(itemId)
 	local weaponModelPath = if type(skinConfig) == "table" then skinConfig.WeaponModelPath else nil
 	if type(weaponModelPath) ~= "string" then
@@ -112,7 +118,8 @@ function DrawHighlightPreviewSupport.CloneWeaponSkinModel(itemId: string, localC
 		return nil
 	end
 
-	return DrawHighlightPreviewWorld.CloneResource(source, `Weapon_{itemId}`, localCFrame, nil)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
+	return runtime.CloneResource(source, `Weapon_{itemId}`, localCFrame, nil)
 end
 
 function DrawHighlightPreviewSupport.GetRootPart(character: Instance): BasePart?
@@ -200,7 +207,8 @@ end
 function DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 	name: string,
 	feetY: number,
-	localCFrame: CFrame?
+	localCFrame: CFrame?,
+	previewRuntime: any?
 ): Instance?
 	local character = localPlayer.Character
 	if character == nil then
@@ -228,7 +236,8 @@ function DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 		baseCFrame = localCFrame
 	end
 
-	local previewCharacter = DrawHighlightPreviewWorld.CloneResource(characterSource, name, baseCFrame, nil, false)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
+	local previewCharacter = runtime.CloneResource(characterSource, name, baseCFrame, nil, false)
 	characterSource:Destroy()
 
 	if previewCharacter ~= nil then

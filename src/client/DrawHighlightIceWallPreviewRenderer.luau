@@ -161,8 +161,8 @@ local function playFireballCastAnimation(playerPreview: Instance?)
 	})
 end
 
-local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?, previewRuntime: any)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return nil
 	end
@@ -175,8 +175,14 @@ local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: numbe
 	})
 end
 
-local function playPersistentAtAnchor(path: string, anchor: BasePart, scale: number?, initialEmitFromRate: boolean?)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playPersistentAtAnchor(
+	path: string,
+	anchor: BasePart,
+	scale: number?,
+	initialEmitFromRate: boolean?,
+	previewRuntime: any
+)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return nil
 	end
@@ -203,7 +209,8 @@ local function tweenAnchorLocalCFrame(
 	generation: number,
 	fromCFrame: CFrame,
 	toCFrame: CFrame,
-	durationSeconds: number
+	durationSeconds: number,
+	previewRuntime: any
 ): boolean
 	local elapsed = 0
 	while elapsed < durationSeconds do
@@ -214,14 +221,14 @@ local function tweenAnchorLocalCFrame(
 		local deltaTime = RunService.RenderStepped:Wait()
 		elapsed += deltaTime
 		local alpha = math.clamp(elapsed / durationSeconds, 0, 1)
-		DrawHighlightPreviewWorld.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
+		previewRuntime.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
 	end
 
 	return generation == previewGeneration and anchor:IsDescendantOf(game)
 end
 
-local function playFireballCastVfxAtAnchor(anchor: BasePart)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playFireballCastVfxAtAnchor(anchor: BasePart, previewRuntime: any)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return
 	end
@@ -235,9 +242,10 @@ local function playFireballCastVfxAtAnchor(anchor: BasePart)
 	})
 end
 
-function DrawHighlightIceWallPreviewRenderer.Render()
+function DrawHighlightIceWallPreviewRenderer.Render(previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
 	if
-		not DrawHighlightPreviewWorld.Begin({
+		not runtime.Begin({
 			distance = 30,
 			offset = Vector3.new(0, -2.3, 0),
 			screenOffset = Vector2.new(0, 0.08),
@@ -259,16 +267,19 @@ function DrawHighlightIceWallPreviewRenderer.Render()
 		ICE_WALL_PREVIEW_PATH,
 		"IceWallPreview",
 		CFrame.new(0, 2.15, 0) * CFrame.Angles(0, math.rad(ICE_WALL_YAW_DEGREES), 0),
-		getIceWallScale()
+		getIceWallScale(),
+		nil,
+		runtime
 	)
 	local player = DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 		"IceWallPlayerPreview",
 		0,
-		getLookFrame(playerPosition, quickDirection)
+		getLookFrame(playerPosition, quickDirection),
+		runtime
 	)
 
 	if wall ~= nil then
-		DrawHighlightPreviewWorld.PlayParticlePlaybackLoop(
+		runtime.PlayParticlePlaybackLoop(
 			wall,
 			getDuration(AbilityConfig.IceWall, "DurationSeconds", "Ice Wall duration must be positive")
 		)
@@ -282,17 +293,13 @@ function DrawHighlightIceWallPreviewRenderer.Render()
 		fastImpact = Vector3.new(-0.55, measured.Y * 0.58, -0.25)
 		quickDirection = quickEnd - quickStart
 		fastDirection = fastImpact - fastStart
-		DrawHighlightPreviewWorld.SetItemLocalCFrame(player, getLookFrame(playerPosition, quickDirection))
+		runtime.SetItemLocalCFrame(player, getLookFrame(playerPosition, quickDirection))
 	end
 
-	local fastAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("IceWallFastFireballAnchor", getLookFrame(fastStart, fastDirection))
-	local quickAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("IceWallQuickFireballAnchor", getLookFrame(quickStart, quickDirection))
-	local castAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("IceWallFireballCastAnchor", getLookFrame(quickStart, quickDirection))
-	local explosionAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("IceWallFastImpactAnchor", getLookFrame(fastImpact, -fastDirection))
+	local fastAnchor = runtime.CreateAnchor("IceWallFastFireballAnchor", getLookFrame(fastStart, fastDirection))
+	local quickAnchor = runtime.CreateAnchor("IceWallQuickFireballAnchor", getLookFrame(quickStart, quickDirection))
+	local castAnchor = runtime.CreateAnchor("IceWallFireballCastAnchor", getLookFrame(quickStart, quickDirection))
+	local explosionAnchor = runtime.CreateAnchor("IceWallFastImpactAnchor", getLookFrame(fastImpact, -fastDirection))
 	if fastAnchor == nil or quickAnchor == nil or castAnchor == nil or explosionAnchor == nil then
 		return
 	end
@@ -301,20 +308,22 @@ function DrawHighlightIceWallPreviewRenderer.Render()
 	task.spawn(function()
 		while generation == previewGeneration and fastAnchor:IsDescendantOf(game) do
 			local fastStartFrame = getLookFrame(fastStart, fastDirection)
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(fastAnchor, fastStartFrame)
-			DrawHighlightPreviewWorld.FlushLayout()
+			runtime.SetItemLocalCFrame(fastAnchor, fastStartFrame)
+			runtime.FlushLayout()
 			local fastEffect = playPersistentAtAnchor(
 				FAST_FIREBALL_PROJECTILE_PREVIEW_PATH,
 				fastAnchor,
 				getFireballTierVisualScale(FAST_FIREBALL_TIER_NAME),
-				true
+				true,
+				runtime
 			)
 			local didReachWall = tweenAnchorLocalCFrame(
 				fastAnchor,
 				generation,
 				getLookFrame(fastStart, fastDirection),
 				getLookFrame(fastImpact, fastDirection),
-				getTravelSeconds(fastStart, fastImpact, FAST_FIREBALL_TIER_NAME)
+				getTravelSeconds(fastStart, fastImpact, FAST_FIREBALL_TIER_NAME),
+				runtime
 			)
 			if not didReachWall then
 				return
@@ -322,7 +331,7 @@ function DrawHighlightIceWallPreviewRenderer.Render()
 			if fastEffect ~= nil then
 				VFXSystem.Stop(fastAnchor, FAST_FIREBALL_PROJECTILE_PREVIEW_PATH)
 			end
-			playEmitOnceAtAnchor(FIREBALL_EXPLOSION_PREVIEW_PATH, explosionAnchor, getFireballExplosionScale())
+			playEmitOnceAtAnchor(FIREBALL_EXPLOSION_PREVIEW_PATH, explosionAnchor, getFireballExplosionScale(), runtime)
 
 			task.wait(ICE_WALL_AFTER_IMPACT_DELAY_SECONDS)
 			if generation ~= previewGeneration or not fastAnchor:IsDescendantOf(game) then
@@ -336,22 +345,24 @@ function DrawHighlightIceWallPreviewRenderer.Render()
 			end
 
 			local quickStartFrame = getLookFrame(quickStart, quickDirection)
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(castAnchor, quickStartFrame)
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(quickAnchor, quickStartFrame)
-			DrawHighlightPreviewWorld.FlushLayout()
-			playFireballCastVfxAtAnchor(castAnchor)
+			runtime.SetItemLocalCFrame(castAnchor, quickStartFrame)
+			runtime.SetItemLocalCFrame(quickAnchor, quickStartFrame)
+			runtime.FlushLayout()
+			playFireballCastVfxAtAnchor(castAnchor, runtime)
 			local quickEffect = playPersistentAtAnchor(
 				QUICK_FIREBALL_PROJECTILE_PREVIEW_PATH,
 				quickAnchor,
 				getFireballTierVisualScale(QUICK_FIREBALL_TIER_NAME),
-				true
+				true,
+				runtime
 			)
 			local didExitFrame = tweenAnchorLocalCFrame(
 				quickAnchor,
 				generation,
 				getLookFrame(quickStart, quickDirection),
 				getLookFrame(quickEnd, quickDirection),
-				getTravelSeconds(quickStart, quickEnd, QUICK_FIREBALL_TIER_NAME)
+				getTravelSeconds(quickStart, quickEnd, QUICK_FIREBALL_TIER_NAME),
+				runtime
 			)
 			if not didExitFrame then
 				return

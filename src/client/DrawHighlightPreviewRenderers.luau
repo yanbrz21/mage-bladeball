@@ -25,8 +25,10 @@ function DrawHighlightPreviewRenderers.Clear()
 	clearRenderers()
 end
 
-function DrawHighlightPreviewRenderers.Render(category: string, itemId: string)
-	clearRenderers()
+function DrawHighlightPreviewRenderers.Render(category: string, itemId: string, previewRuntime: any?)
+	if previewRuntime == nil then
+		clearRenderers()
+	end
 	DrawHighlightPreviewSupport.ConfigureVFXSystem(
 		require(
 			game:GetService("Players").LocalPlayer
@@ -38,14 +40,14 @@ function DrawHighlightPreviewRenderers.Render(category: string, itemId: string)
 	)
 
 	if category == CATEGORY_WEAPON_SKIN then
-		DrawHighlightWeaponSkinPreviewRenderers.Render(itemId)
+		DrawHighlightWeaponSkinPreviewRenderers.Render(itemId, previewRuntime)
 	elseif category == CATEGORY_ABILITY then
 		if itemId == "ice_wall" then
-			DrawHighlightIceWallPreviewRenderer.Render()
+			DrawHighlightIceWallPreviewRenderer.Render(previewRuntime)
 		elseif itemId == "healing_zone" then
-			DrawHighlightHealingZonePreviewRenderer.Render()
+			DrawHighlightHealingZonePreviewRenderer.Render(previewRuntime)
 		elseif itemId == "deflect_shield" then
-			DrawHighlightDeflectShieldPreviewRenderer.Render()
+			DrawHighlightDeflectShieldPreviewRenderer.Render(previewRuntime)
 		else
 			warn(`[DrawController] no highlight preview defined for ability: {itemId}`)
 		end

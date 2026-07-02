@@ -22,6 +22,8 @@ local DrawPricingView = require(Parabellum:WaitForChild("DrawPricingView"))
 local DrawRequestFlow = require(Parabellum:WaitForChild("DrawRequestFlow"))
 local DrawRollSequence = require(Parabellum:WaitForChild("DrawRollSequence"))
 local DrawSpinTypeTabs = require(Parabellum:WaitForChild("DrawSpinTypeTabs"))
+local DrawWorldEntryPrompts = require(Parabellum:WaitForChild("DrawWorldEntryPrompts"))
+local DrawWorldHighlightPreviewManager = require(Parabellum:WaitForChild("DrawWorldHighlightPreviewManager"))
 local InventoryItemVisuals = require(Parabellum:WaitForChild("InventoryItemVisuals"))
 
 local HUD_SCREENGUI: ScreenGui?
@@ -44,6 +46,24 @@ local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
 local SPIN_TYPE_CONNECTED_ATTRIBUTE = "ParabellumSpinTypeConnected"
 
 local DRAW_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumDrawEntryConnected"
+local NORMAL_DRAW_ID = "NormalDraw"
+local PREMIUM_DRAW_ID = "LaunchRobuxMixedDraw"
+local DRAW_WORLD_ENTRIES = table.freeze({
+	table.freeze({
+		modelName = "NormalDraw",
+		drawId = NORMAL_DRAW_ID,
+		actionText = "Open",
+		objectText = "Normal Draw",
+		worldName = "NormalDraw",
+	}),
+	table.freeze({
+		modelName = "PremiumDraw",
+		drawId = PREMIUM_DRAW_ID,
+		actionText = "Open",
+		objectText = "Premium Draw",
+		worldName = "PremiumDraw",
+	}),
+})
 
 type SkinDrawResultPayload = DrawCatalogUtils.SkinDrawResultPayload
 type ResolvedDraw = DrawCatalogUtils.ResolvedDraw
@@ -91,6 +111,8 @@ local selectedHighlightKey: string?
 
 local connections: { RBXScriptConnection } = {}
 local didBuildUI = false
+local stopWorldEntryPrompts: (() -> ())?
+local worldHighlightPreviewManager: any?
 
 function DrawController:Init(context)
 	if self._didInit then
@@ -582,6 +604,29 @@ local function closeDrawUi()
 	DrawPresentationState.Disable()
 	setScreenEnabled(false)
 	setHudVisible(true)
+	if worldHighlightPreviewManager ~= nil then
+		worldHighlightPreviewManager:Resume()
+	end
+end
+
+local function pauseWorldHighlightPreviews()
+	if worldHighlightPreviewManager ~= nil then
+		worldHighlightPreviewManager:Pause()
+	end
+end
+
+local function startDrawWorldEntries()
+	if stopWorldEntryPrompts == nil then
+		stopWorldEntryPrompts = DrawWorldEntryPrompts.Start(DRAW_WORLD_ENTRIES :: any, function(drawId: string)
+			DrawController:OpenDraw(drawId)
+		end)
+	end
+
+	if worldHighlightPreviewManager == nil then
+		local manager = DrawWorldHighlightPreviewManager.new(DRAW_WORLD_ENTRIES :: any, 20)
+		worldHighlightPreviewManager = manager
+		manager:Start()
+	end
 end
 
 local function connectDrawClose()
@@ -765,6 +810,7 @@ function DrawController:BuildUI()
 	end
 
 	connectSpinTypeButtons()
+	startDrawWorldEntries()
 
 	table.insert(
 		connections,
@@ -830,6 +876,7 @@ function DrawController:Open()
 		return
 	end
 
+	pauseWorldHighlightPreviews()
 	setScreenEnabled(true)
 	setHudVisible(false)
 	DrawPresentationState.Enable()

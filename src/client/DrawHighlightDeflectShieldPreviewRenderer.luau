@@ -164,9 +164,10 @@ local function playPersistentAtAnchor(
 	anchor: BasePart,
 	scale: number?,
 	initialEmitFromRate: boolean?,
-	color: Color3?
+	color: Color3?,
+	previewRuntime: any
 ): Instance?
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return nil
 	end
@@ -183,8 +184,8 @@ local function playPersistentAtAnchor(
 	return effect
 end
 
-local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: number?, previewRuntime: any)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return nil
 	end
@@ -197,8 +198,8 @@ local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: numbe
 	})
 end
 
-local function playShield(rootPart: BasePart)
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playShield(rootPart: BasePart, previewRuntime: any)
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return
 	end
@@ -221,7 +222,8 @@ local function tweenAnchorLocalCFrame(
 	generation: number,
 	fromCFrame: CFrame,
 	toCFrame: CFrame,
-	durationSeconds: number
+	durationSeconds: number,
+	previewRuntime: any
 ): boolean
 	local elapsed = 0
 	while elapsed < durationSeconds do
@@ -232,15 +234,16 @@ local function tweenAnchorLocalCFrame(
 		local deltaTime = RunService.RenderStepped:Wait()
 		elapsed += deltaTime
 		local alpha = math.clamp(elapsed / durationSeconds, 0, 1)
-		DrawHighlightPreviewWorld.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
+		previewRuntime.SetItemLocalCFrame(anchor, fromCFrame:Lerp(toCFrame, alpha))
 	end
 
 	return generation == previewGeneration and anchor:IsDescendantOf(game)
 end
 
-function DrawHighlightDeflectShieldPreviewRenderer.Render()
+function DrawHighlightDeflectShieldPreviewRenderer.Render(previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
 	if
-		not DrawHighlightPreviewWorld.Begin({
+		not runtime.Begin({
 			distance = 30,
 			offset = Vector3.new(0, -2.15, 0),
 			screenOffset = Vector2.new(0, 0.08),
@@ -255,13 +258,14 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 	local player = DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 		"DeflectShieldPlayerPreview",
 		0,
-		getLookFrame(playerPosition, SHIELD_DIRECTION)
+		getLookFrame(playerPosition, SHIELD_DIRECTION),
+		runtime
 	)
 	if player ~= nil then
 		local measured = DrawHighlightPreviewSupport.GetCharacterSize(player)
 		playerPosition = Vector3.new(PLAYER_LOCAL_X, measured.Y * 0.5, PLAYER_LOCAL_Z)
 		playerSize = measured
-		DrawHighlightPreviewWorld.SetItemLocalCFrame(player, getLookFrame(playerPosition, SHIELD_DIRECTION))
+		runtime.SetItemLocalCFrame(player, getLookFrame(playerPosition, SHIELD_DIRECTION))
 		playDeflectShieldAnimation(player)
 	end
 
@@ -270,7 +274,7 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 		return
 	end
 
-	playShield(rootPart)
+	playShield(rootPart, runtime)
 
 	local projectileY = playerSize.Y * PROJECTILE_HEIGHT_RATIO
 	local impactPosition = playerPosition + DEFLECT_SHIELD_OFFSET + SHIELD_DIRECTION * DEFLECT_SHIELD_FRONT_DISTANCE
@@ -283,16 +287,11 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 	local outgoingDirection = outgoingEnd - impactPosition
 	local pulsePosition = impactPosition + outgoingDirection.Unit * DEFLECT_PULSE_FORWARD_OFFSET
 
-	local incomingAnchor = DrawHighlightPreviewWorld.CreateAnchor(
-		"DeflectIncomingFireballAnchor",
-		getLookFrame(incomingStart, incomingDirection)
-	)
-	local outgoingAnchor = DrawHighlightPreviewWorld.CreateAnchor(
-		"DeflectOutgoingFireballAnchor",
-		getLookFrame(impactPosition, outgoingDirection)
-	)
-	local pulseAnchor =
-		DrawHighlightPreviewWorld.CreateAnchor("DeflectPulseAnchor", getLookFrame(pulsePosition, outgoingDirection))
+	local incomingAnchor =
+		runtime.CreateAnchor("DeflectIncomingFireballAnchor", getLookFrame(incomingStart, incomingDirection))
+	local outgoingAnchor =
+		runtime.CreateAnchor("DeflectOutgoingFireballAnchor", getLookFrame(impactPosition, outgoingDirection))
+	local pulseAnchor = runtime.CreateAnchor("DeflectPulseAnchor", getLookFrame(pulsePosition, outgoingDirection))
 	if incomingAnchor == nil or outgoingAnchor == nil or pulseAnchor == nil then
 		return
 	end
@@ -309,15 +308,16 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 	task.spawn(function()
 		while generation == previewGeneration and incomingAnchor:IsDescendantOf(game) do
 			local incomingStartFrame = getLookFrame(incomingStart, incomingDirection)
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(incomingAnchor, incomingStartFrame)
+			runtime.SetItemLocalCFrame(incomingAnchor, incomingStartFrame)
 			-- Pivot anchors before spawning Trail-based VFX so they do not record stale world positions.
-			DrawHighlightPreviewWorld.FlushLayout()
+			runtime.FlushLayout()
 			local incomingEffect = playPersistentAtAnchor(
 				FAST_FIREBALL_PROJECTILE_PREVIEW_PATH,
 				incomingAnchor,
 				INCOMING_PROJECTILE_SCALE,
 				true,
-				nil
+				nil,
+				runtime
 			)
 
 			local didReachShield = tweenAnchorLocalCFrame(
@@ -325,7 +325,8 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 				generation,
 				incomingStartFrame,
 				getLookFrame(impactPosition, incomingDirection),
-				incomingTravelSeconds
+				incomingTravelSeconds,
+				runtime
 			)
 			if not didReachShield then
 				return
@@ -335,20 +336,18 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 			end
 
 			local pulseFrame = getLookFrame(pulsePosition, outgoingDirection)
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(pulseAnchor, pulseFrame)
-			DrawHighlightPreviewWorld.SetItemLocalCFrame(
-				outgoingAnchor,
-				getLookFrame(impactPosition, outgoingDirection)
-			)
+			runtime.SetItemLocalCFrame(pulseAnchor, pulseFrame)
+			runtime.SetItemLocalCFrame(outgoingAnchor, getLookFrame(impactPosition, outgoingDirection))
 			-- Keep pulse and rebound projectile aligned on the same rendered frame.
-			DrawHighlightPreviewWorld.FlushLayout()
-			playEmitOnceAtAnchor(DEFLECT_PULSE_PREVIEW_PATH, pulseAnchor, DEFLECT_PULSE_SCALE)
+			runtime.FlushLayout()
+			playEmitOnceAtAnchor(DEFLECT_PULSE_PREVIEW_PATH, pulseAnchor, DEFLECT_PULSE_SCALE, runtime)
 			local outgoingEffect = playPersistentAtAnchor(
 				FAST_FIREBALL_PROJECTILE_PREVIEW_PATH,
 				outgoingAnchor,
 				OUTGOING_PROJECTILE_SCALE,
 				true,
-				deflectedColor
+				deflectedColor,
+				runtime
 			)
 
 			local didExitFrame = tweenAnchorLocalCFrame(
@@ -356,7 +355,8 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render()
 				generation,
 				getLookFrame(impactPosition, outgoingDirection),
 				getLookFrame(outgoingEnd, outgoingDirection),
-				outgoingTravelSeconds
+				outgoingTravelSeconds,
+				runtime
 			)
 			if not didExitFrame then
 				return

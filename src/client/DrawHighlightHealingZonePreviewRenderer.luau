@@ -57,8 +57,8 @@ local function getHealingZoneCircleSurfaceY(scale: number): number
 	return sourceSize.Y * scale * 0.5
 end
 
-local function playHealingZoneHeal(rootPart: BasePart): boolean
-	local previewWorld = DrawHighlightPreviewWorld.GetWorld()
+local function playHealingZoneHeal(rootPart: BasePart, previewRuntime: any): boolean
+	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil or rootPart.Parent == nil then
 		return false
 	end
@@ -76,7 +76,12 @@ local function playHealingZoneHeal(rootPart: BasePart): boolean
 	return true
 end
 
-local function addHealingZonePlaybackLoop(circle: Instance, playerPreview: Instance, rootPart: BasePart)
+local function addHealingZonePlaybackLoop(
+	circle: Instance,
+	playerPreview: Instance,
+	rootPart: BasePart,
+	previewRuntime: any
+)
 	local generation = previewGeneration
 	local durationSeconds =
 		getDuration(AbilityConfig.HealingZone, "DurationSeconds", "Healing Zone duration must be positive")
@@ -87,7 +92,7 @@ local function addHealingZonePlaybackLoop(circle: Instance, playerPreview: Insta
 		RunService.RenderStepped:Wait()
 
 		while generation == previewGeneration and playerPreview:IsDescendantOf(game) and circle:IsDescendantOf(game) do
-			local playbackEndTime = DrawHighlightPreviewWorld.PlayParticlePlaybackOnce(circle)
+			local playbackEndTime = previewRuntime.PlayParticlePlaybackOnce(circle)
 
 			local elapsed = 0
 			while
@@ -95,7 +100,7 @@ local function addHealingZonePlaybackLoop(circle: Instance, playerPreview: Insta
 				and generation == previewGeneration
 				and playerPreview:IsDescendantOf(game)
 			do
-				if not playHealingZoneHeal(rootPart) then
+				if not playHealingZoneHeal(rootPart, previewRuntime) then
 					return
 				end
 
@@ -114,9 +119,10 @@ local function addHealingZonePlaybackLoop(circle: Instance, playerPreview: Insta
 	end)
 end
 
-function DrawHighlightHealingZonePreviewRenderer.Render()
+function DrawHighlightHealingZonePreviewRenderer.Render(previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
 	if
-		not DrawHighlightPreviewWorld.Begin({
+		not runtime.Begin({
 			distance = 35,
 			offset = Vector3.new(0, -2.35, 0),
 			screenOffset = Vector2.new(0, 0.16),
@@ -132,18 +138,20 @@ function DrawHighlightHealingZonePreviewRenderer.Render()
 		"HealingZoneCirclePreview",
 		CFrame.new(0, 0, 0),
 		circleScale,
-		false
+		false,
+		runtime
 	)
 
 	local playerPreview = DrawHighlightPreviewSupport.CloneLocalPlayerPreviewCharacter(
 		"HealingZonePlayerPreview",
 		getHealingZoneCircleSurfaceY(circleScale) + HEALING_ZONE_PLAYER_FEET_LIFT,
-		nil
+		nil,
+		runtime
 	)
 	if circle ~= nil and playerPreview ~= nil then
 		local rootPart = DrawHighlightPreviewSupport.GetRootPart(playerPreview)
 		if rootPart ~= nil then
-			addHealingZonePlaybackLoop(circle, playerPreview, rootPart)
+			addHealingZonePlaybackLoop(circle, playerPreview, rootPart, runtime)
 		end
 	end
 end
