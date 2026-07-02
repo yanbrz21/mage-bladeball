@@ -117,10 +117,6 @@ end
 function DrawHighlightHealingZonePreviewRenderer.Render()
 	if
 		not DrawHighlightPreviewWorld.Begin({
-			-- Keep this tuned against Docs/implementation/draw_highlight_healing_zone_preview.md.
-			-- Visual baseline captured from hand-tuned preview:
-			-- Preview fill ~= 86.5% width / 89.1% height, margins L/R ~= 47px,
-			-- top ~= 66px, bottom bbox ~= -28px including Heal tick effect bounds.
 			distance = 35,
 			offset = Vector3.new(0, -2.35, 0),
 			screenOffset = Vector2.new(0, 0.16),

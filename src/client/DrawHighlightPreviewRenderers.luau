@@ -3,7 +3,7 @@
 local DrawHighlightDeflectShieldPreviewRenderer =
 	require(script.Parent:WaitForChild("DrawHighlightDeflectShieldPreviewRenderer"))
 local DrawHighlightHealingZonePreviewRenderer =
-	require(script.Parent:WaitForChild("DrawHighlightAbilityPreviewRenderers"))
+	require(script.Parent:WaitForChild("DrawHighlightHealingZonePreviewRenderer"))
 local DrawHighlightIceWallPreviewRenderer = require(script.Parent:WaitForChild("DrawHighlightIceWallPreviewRenderer"))
 local DrawHighlightPreviewSupport = require(script.Parent:WaitForChild("DrawHighlightPreviewSupport"))
 local DrawHighlightWeaponSkinPreviewRenderers =
