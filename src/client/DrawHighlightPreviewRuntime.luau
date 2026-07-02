@@ -413,9 +413,8 @@ function DrawHighlightPreviewRuntime.new(options: RuntimeOptions): Runtime
 			return CFrame.new()
 		end
 
-		local cframe, size = model:GetBoundingBox()
-		local basePosition = cframe.Position + Vector3.new(0, size.Y * 0.5, 0) + worldAnchorOffset
 		local pivot = model:GetPivot()
+		local basePosition = pivot.Position + worldAnchorOffset
 		local baseRotation = pivot - pivot.Position
 		local base = CFrame.new(basePosition) * baseRotation * CFrame.Angles(0, math.pi, 0)
 		local offset = layoutOptions.offset or Vector3.zero

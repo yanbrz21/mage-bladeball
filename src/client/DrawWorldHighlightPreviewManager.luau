@@ -18,7 +18,7 @@ local InventoryItemVisuals = require(Parabellum:WaitForChild("InventoryItemVisua
 local DrawWorldHighlightPreviewManager = {}
 
 local PREVIEW_PARENT_FOLDER_NAME = "DrawStandHighlightPreviewWorlds"
-local PREVIEW_ANCHOR_OFFSET = Vector3.new(0, 8, 0)
+local PREVIEW_FIXED_HEIGHT_OFFSET = Vector3.new(0, 8, 0)
 local PREVIEW_WORLD_SCALE = 1
 local DEFAULT_CYCLE_SECONDS = 20
 local INITIAL_READY_TIMEOUT_SECONDS = 8
@@ -89,7 +89,7 @@ local function renderSlot(slot: Slot)
 	end
 
 	slot.runtime.Clear()
-	slot.runtime.SetWorldAnchor(slot.model, PREVIEW_ANCHOR_OFFSET)
+	slot.runtime.SetWorldAnchor(slot.model, PREVIEW_FIXED_HEIGHT_OFFSET)
 	DrawHighlightPreviewRenderers.Render(entry.Category, entry.ItemId, slot.runtime)
 end
 
@@ -169,7 +169,7 @@ function DrawWorldHighlightPreviewManager.new(configs: { StandConfig }, cycleSec
 			worldScale = PREVIEW_WORLD_SCALE,
 		})
 
-		runtime.SetWorldAnchor(model, PREVIEW_ANCHOR_OFFSET)
+		runtime.SetWorldAnchor(model, PREVIEW_FIXED_HEIGHT_OFFSET)
 		table.insert(slots, {
 			config = config,
 			model = model,
