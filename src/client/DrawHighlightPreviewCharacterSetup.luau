@@ -3,11 +3,12 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
+local InstanceUtils =
+	require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("CommonKit"):WaitForChild("InstanceUtils"))
 local PlayerAnimationConfig = require(Config:WaitForChild("PlayerAnimationConfig"))
 
 local DrawHighlightPreviewCharacterSetup = {}
@@ -21,26 +22,7 @@ local AnimationManager: any =
 	require(playerScripts:WaitForChild("ClientPackages"):WaitForChild("CommonKit"):WaitForChild("AnimationManager"))
 
 local function resolveInstancePath(path: string): Instance?
-	local current: Instance? = nil
-	local isFirstSegment = true
-
-	for segment in string.gmatch(path, "[^%.]+") do
-		if isFirstSegment then
-			if segment == "ReplicatedStorage" then
-				current = ReplicatedStorage
-			elseif segment == "Workspace" then
-				current = Workspace
-			else
-				current = game:FindFirstChild(segment)
-			end
-
-			isFirstSegment = false
-		elseif current ~= nil then
-			current = current:FindFirstChild(segment)
-		end
-	end
-
-	return current
+	return InstanceUtils.FindAbsolutePath(path)
 end
 
 local function getRootPart(character: Instance): BasePart?

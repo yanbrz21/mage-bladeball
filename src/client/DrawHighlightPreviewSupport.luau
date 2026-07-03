@@ -2,13 +2,14 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
 local DrawHighlightPreviewCharacterSetup = require(script.Parent:WaitForChild("DrawHighlightPreviewCharacterSetup"))
 local DrawHighlightPreviewWorld = require(script.Parent:WaitForChild("DrawHighlightPreviewWorld"))
+local InstanceUtils =
+	require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("CommonKit"):WaitForChild("InstanceUtils"))
 local PlayerAnimationConfig = require(Config:WaitForChild("PlayerAnimationConfig"))
 local WeaponSkinVFXConfig = require(Config:WaitForChild("WeaponSkinVFXConfig"))
 
@@ -44,26 +45,7 @@ function DrawHighlightPreviewSupport.ResolveEffectPath(path: string): Instance?
 end
 
 function DrawHighlightPreviewSupport.ResolveInstancePath(path: string): Instance?
-	local current: Instance? = nil
-	local isFirstSegment = true
-
-	for segment in string.gmatch(path, "[^%.]+") do
-		if isFirstSegment then
-			if segment == "ReplicatedStorage" then
-				current = ReplicatedStorage
-			elseif segment == "Workspace" then
-				current = Workspace
-			else
-				current = game:FindFirstChild(segment)
-			end
-
-			isFirstSegment = false
-		elseif current ~= nil then
-			current = current:FindFirstChild(segment)
-		end
-	end
-
-	return current
+	return InstanceUtils.FindAbsolutePath(path)
 end
 
 function DrawHighlightPreviewSupport.CloneEffectPath(

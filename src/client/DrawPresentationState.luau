@@ -1,8 +1,12 @@
 --!strict
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+
+local InstanceUtils =
+	require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("CommonKit"):WaitForChild("InstanceUtils"))
 
 local DrawPresentationState = {}
 
@@ -84,12 +88,7 @@ local function restoreManagedGuis()
 end
 
 local function findLobbySpawn(): BasePart?
-	local lobby = Workspace:FindFirstChild("SwordnWizardLobby")
-	if lobby == nil then
-		return nil
-	end
-
-	local lobbySpawn = lobby:FindFirstChild("LobbySpawn")
+	local lobbySpawn = InstanceUtils.FindByPath(Workspace, "SwordnWizardLobby.LobbySpawn")
 	if lobbySpawn ~= nil and lobbySpawn:IsA("BasePart") then
 		return lobbySpawn
 	end

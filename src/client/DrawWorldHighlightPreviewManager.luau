@@ -9,6 +9,8 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
 local DrawConfig = require(Config:WaitForChild("DrawConfig"))
+local InstanceUtils =
+	require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("CommonKit"):WaitForChild("InstanceUtils"))
 local Parabellum = ReplicatedStorage:WaitForChild("Parabellum")
 local DrawCatalogUtils = require(Parabellum:WaitForChild("DrawCatalogUtils"))
 local DrawHighlightPreviewRenderers = require(Parabellum:WaitForChild("DrawHighlightPreviewRenderers"))
@@ -22,6 +24,7 @@ local PREVIEW_FIXED_HEIGHT_OFFSET = Vector3.new(0, 8, 0)
 local PREVIEW_WORLD_SCALE = 1
 local DEFAULT_CYCLE_SECONDS = 20
 local INITIAL_READY_TIMEOUT_SECONDS = 8
+local DRAW_MODEL_WAIT_SECONDS = 10
 
 local localPlayer = Players.LocalPlayer
 
@@ -51,8 +54,7 @@ type Manager = {
 }
 
 local function findLobbyGeometry(): Instance?
-	local lobby = Workspace:FindFirstChild("SwordnWizardLobby")
-	return if lobby ~= nil then lobby:FindFirstChild("Geometry") else nil
+	return InstanceUtils.FindByPath(Workspace, "SwordnWizardLobby.Geometry")
 end
 
 local function findDrawModel(modelName: string): Model?
@@ -60,6 +62,21 @@ local function findDrawModel(modelName: string): Model?
 	local model = if geometry ~= nil then geometry:FindFirstChild(modelName) else nil
 	if model ~= nil and model:IsA("Model") then
 		return model
+	end
+
+	return nil
+end
+
+local function waitForDrawModel(modelName: string): Model?
+	local model = findDrawModel(modelName)
+	if model ~= nil then
+		return model
+	end
+
+	local found =
+		InstanceUtils.WaitForPath(Workspace, DRAW_MODEL_WAIT_SECONDS, "SwordnWizardLobby", "Geometry", modelName)
+	if found ~= nil and found:IsA("Model") then
+		return found
 	end
 
 	return nil
@@ -153,9 +170,9 @@ function DrawWorldHighlightPreviewManager.new(configs: { StandConfig }, cycleSec
 	local slots = {} :: { Slot }
 
 	for _, config in configs do
-		local model = findDrawModel(config.modelName)
+		local model = waitForDrawModel(config.modelName)
 		if model == nil then
-			warn(`[DrawController] draw stand preview model not found: {config.modelName}`)
+			warn(`[DrawController] draw stand preview model not found after wait: {config.modelName}`)
 			continue
 		end
 
