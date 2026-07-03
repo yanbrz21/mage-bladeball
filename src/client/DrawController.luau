@@ -76,19 +76,14 @@ local coinsText: TextLabel?
 local spinItems: Frame?
 
 local spin1xButton: TextButton?
-local spin5xButton: TextButton?
 
 local drawButton: GuiButton?
 local drawClose: GuiObject?
 
-local gemsDrawPrice: TextLabel?
 local coinsDrawPrice: TextLabel?
 
-local spinPrices: Frame?
 local price1x: TextLabel?
-local price5x: TextLabel?
 local price1xIcon: ImageLabel?
-local price5xIcon: ImageLabel?
 
 local rngFrame: Frame?
 local chooseDrawFrame: Frame?
@@ -435,13 +430,9 @@ local function updateDrawPrices()
 	DrawPricingView.Update({
 		refs = {
 			spin1xButton = spin1xButton,
-			spin5xButton = spin5xButton,
 			price1x = price1x,
-			price5x = price5x,
 			coinsDrawPrice = coinsDrawPrice,
-			gemsDrawPrice = gemsDrawPrice,
 			price1xIcon = price1xIcon,
-			price5xIcon = price5xIcon,
 		},
 		currentDrawId = currentDrawId,
 		currentCount = currentCount,
@@ -535,6 +526,7 @@ local function handleSkinDrawResult(payload: SkinDrawResultPayload)
 		return
 	end
 
+	DrawController:OpenDraw(payload.drawId, true)
 	rollSequence:Start(payload)
 end
 
@@ -677,14 +669,11 @@ function DrawController:GetReferences()
 	coinsText = getReferenceByTag("SPIN_COINS") :: TextLabel?
 
 	spin1xButton = getReferenceByTag("SPIN_1X_BUTTON") :: TextButton?
-	spin5xButton = getReferenceByTag("SPIN_5X_BUTTON") :: TextButton?
 
 	drawButton = getOptionalReferenceByTag("DRAW_BUTTON") :: GuiButton?
 
-	gemsDrawPrice = getReferenceByTag("GEMS_DRAW_PRICE") :: TextLabel?
 	coinsDrawPrice = getReferenceByTag("COINS_DRAW_PRICE") :: TextLabel?
 
-	spinPrices = getReferenceByTag("SPIN_PRICES") :: Frame?
 	spinItems = getReferenceByTag("SPIN_ITEMS") :: Frame?
 
 	screen = getReferenceByTag("SPIN_SCREEN") :: ScreenGui?
@@ -708,30 +697,12 @@ function DrawController:GetReferences()
 		drawClose = foundDrawClose
 	end
 
-	if spinPrices ~= nil then
-		local foundPrice1x = spinPrices:FindFirstChild("x1", true)
-		local foundPrice5x = spinPrices:FindFirstChild("x5", true)
-
-		if foundPrice1x ~= nil and foundPrice1x:IsA("TextLabel") then
-			price1x = foundPrice1x
-		end
-
-		if foundPrice5x ~= nil and foundPrice5x:IsA("TextLabel") then
-			price5x = foundPrice5x
-		end
-	end
-
 	if coinsDrawPrice ~= nil and coinsDrawPrice.Parent ~= nil then
+		price1x = coinsDrawPrice
+
 		local icon = coinsDrawPrice.Parent:FindFirstChild("Icon")
 		if icon ~= nil and icon:IsA("ImageLabel") then
 			price1xIcon = icon
-		end
-	end
-
-	if gemsDrawPrice ~= nil and gemsDrawPrice.Parent ~= nil then
-		local icon = gemsDrawPrice.Parent:FindFirstChild("Icon")
-		if icon ~= nil and icon:IsA("ImageLabel") then
-			price5xIcon = icon
 		end
 	end
 
@@ -787,15 +758,6 @@ function DrawController:BuildUI()
 			connections,
 			spin1xButton.Activated:Connect(function()
 				onDrawButtonClicked(1)
-			end)
-		)
-	end
-
-	if spin5xButton ~= nil then
-		table.insert(
-			connections,
-			spin5xButton.Activated:Connect(function()
-				onDrawButtonClicked(5)
 			end)
 		)
 	end
@@ -869,8 +831,8 @@ function DrawController:BuildUI()
 	)
 end
 
-function DrawController:Open()
-	if isLocalPlayerLockedForRound() then
+function DrawController:Open(forceOpen: boolean?)
+	if not forceOpen and isLocalPlayerLockedForRound() then
 		closeDrawUi()
 		updateDrawEntryVisibility()
 		return
@@ -895,9 +857,9 @@ function DrawController:Open()
 	updateSpinTypeButtonsVisual()
 end
 
-function DrawController:OpenDraw(drawId: string)
+function DrawController:OpenDraw(drawId: string, forceOpen: boolean?)
 	setCurrentDraw(drawId)
-	self:Open()
+	self:Open(forceOpen)
 end
 
 function DrawController:Close()

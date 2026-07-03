@@ -129,6 +129,10 @@ function DrawRollSequence:_setSkipButtonTitle(text: string)
 	skipDrawButton.Text = text
 end
 
+function DrawRollSequence:_setSkipButtonVisible(visible: boolean)
+	setGuiVisible(self._refs.skipDrawButton, visible)
+end
+
 function DrawRollSequence:_setExplanation(text: string)
 	local rollExplanationText = self._refs.rollExplanationText
 	if rollExplanationText ~= nil then
@@ -156,6 +160,7 @@ function DrawRollSequence:BeginWaiting(showRollUi: boolean)
 		setGuiVisible(self._refs.chooseDrawFrame, false)
 		setGuiVisible(self._refs.rngFrame, true)
 		self:_setSkipButtonTitle("SKIP")
+		self:_setSkipButtonVisible(false)
 		self:_setExplanation("Rolling...")
 		self:_clearClones()
 	end
@@ -174,6 +179,7 @@ function DrawRollSequence:ResetToChoose(refresh: boolean?)
 	setGuiVisible(self._refs.rngFrame, false)
 	setGuiVisible(self._refs.chooseDrawFrame, true)
 	self:_setSkipButtonTitle("SKIP")
+	self:_setSkipButtonVisible(false)
 	self:_setExplanation("")
 
 	if refresh == true then
@@ -188,12 +194,14 @@ function DrawRollSequence:ResetAfterFailure()
 
 	setGuiVisible(self._refs.chooseDrawFrame, true)
 	setGuiVisible(self._refs.rngFrame, false)
+	self:_setSkipButtonVisible(false)
 end
 
 function DrawRollSequence:ResetAfterEmptyResult()
 	self._isDrawing = false
 	self._isRolling = false
 	self._isWaitingForDrawResult = false
+	self:_setSkipButtonVisible(false)
 end
 
 function DrawRollSequence:_fireRollTick()
@@ -205,7 +213,8 @@ function DrawRollSequence:_fireRollStopped()
 end
 
 function DrawRollSequence:_fireResultRevealed(result: SkinDrawResultPayload?)
-	EventBus.Fire(LOCAL_DRAW_RESULT_REVEALED_EVENT, DrawCatalogUtils.HasRareDrawReward(result))
+	local drawConfig = if result ~= nil then self._callbacks.getDrawConfig(result.drawId) else nil
+	EventBus.Fire(LOCAL_DRAW_RESULT_REVEALED_EVENT, DrawCatalogUtils.HasHighlightDrawReward(drawConfig, result))
 end
 
 function DrawRollSequence:_finish()
@@ -216,6 +225,7 @@ function DrawRollSequence:_finish()
 
 	self:_stopTween()
 	self:_setSkipButtonTitle("CLAIM")
+	self:_setSkipButtonVisible(true)
 	self:_fireResultRevealed(self._latestDrawResult)
 end
 
@@ -252,7 +262,6 @@ end
 
 function DrawRollSequence:HandleSkipOrClaim()
 	if self._isRolling or self._isWaitingForDrawResult then
-		self:Skip()
 		return
 	end
 
@@ -437,6 +446,7 @@ function DrawRollSequence:Start(result: SkinDrawResultPayload): boolean
 	setGuiVisible(self._refs.chooseDrawFrame, false)
 	setGuiVisible(self._refs.rngFrame, true)
 	self:_setSkipButtonTitle("SKIP")
+	self:_setSkipButtonVisible(false)
 	self:_setExplanation("Rolling...")
 
 	task.spawn(function()

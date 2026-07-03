@@ -380,14 +380,32 @@ function DrawCatalogUtils.GetRollVisualItemFromReward(
 	}
 end
 
-function DrawCatalogUtils.HasRareDrawReward(result: SkinDrawResultPayload?): boolean
-	if result == nil then
+function DrawCatalogUtils.HasHighlightDrawReward(drawConfig, result: SkinDrawResultPayload?): boolean
+	if drawConfig == nil or result == nil then
 		return false
 	end
 
-	for _, reward in result.rewards do
-		if reward.rarity ~= "Common" then
-			return true
+	local highlights = drawConfig.Highlights
+	if type(highlights) ~= "table" then
+		return false
+	end
+
+	for _, highlight in highlights do
+		if type(highlight) ~= "table" then
+			continue
+		end
+
+		local highlightConfig = highlight :: any
+		local category = highlightConfig.Category
+		local itemId = highlightConfig.ItemId
+		if type(category) ~= "string" or type(itemId) ~= "string" then
+			continue
+		end
+
+		for _, reward in result.rewards do
+			if reward.category == category and reward.itemId == itemId then
+				return true
+			end
 		end
 	end
 

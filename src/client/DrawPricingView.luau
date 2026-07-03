@@ -12,13 +12,9 @@ local ROBUX_PRICE_ICON = "rbxassetid://138110852462666"
 
 export type Refs = {
 	spin1xButton: TextButton?,
-	spin5xButton: TextButton?,
 	price1x: TextLabel?,
-	price5x: TextLabel?,
 	coinsDrawPrice: TextLabel?,
-	gemsDrawPrice: TextLabel?,
 	price1xIcon: ImageLabel?,
-	price5xIcon: ImageLabel?,
 }
 
 export type Params = {
@@ -57,10 +53,6 @@ local function setPriceIcons(refs: Refs, image: string)
 	if refs.price1xIcon ~= nil then
 		refs.price1xIcon.Image = image
 	end
-
-	if refs.price5xIcon ~= nil then
-		refs.price5xIcon.Image = image
-	end
 end
 
 local function isCoinDrawCountAllowed(drawConfig, count: number): boolean
@@ -83,34 +75,19 @@ local function updateRobuxDrawPrices(params: Params)
 	setPriceIcons(refs, ROBUX_PRICE_ICON)
 
 	local product1x = params.findRobuxDrawProduct(params.currentDrawId, 1)
-	local product5x = params.findRobuxDrawProduct(params.currentDrawId, 5)
 
 	if refs.price1x ~= nil then
 		refs.price1x.Text = if product1x ~= nil then tostring(product1x.robuxPrice) else "--"
-	end
-
-	if refs.price5x ~= nil then
-		refs.price5x.Text = if product5x ~= nil then tostring(product5x.robuxPrice) else "--"
 	end
 
 	if refs.coinsDrawPrice ~= nil then
 		refs.coinsDrawPrice.Text = if product1x ~= nil then tostring(product1x.robuxPrice) else "--"
 	end
 
-	if refs.gemsDrawPrice ~= nil then
-		refs.gemsDrawPrice.Text = if product5x ~= nil then tostring(product5x.robuxPrice) else "--"
-	end
-
 	if refs.spin1xButton ~= nil then
 		refs.spin1xButton.Visible = product1x ~= nil
 		setButtonTitle(refs.spin1xButton, "Buy x1")
 		setDrawButtonEnabled(refs.spin1xButton, product1x ~= nil and product1x.productId > 0)
-	end
-
-	if refs.spin5xButton ~= nil then
-		refs.spin5xButton.Visible = product5x ~= nil
-		setButtonTitle(refs.spin5xButton, "Buy x5")
-		setDrawButtonEnabled(refs.spin5xButton, product5x ~= nil and product5x.productId > 0)
 	end
 end
 
@@ -123,7 +100,6 @@ local function updateCoinDrawPrices(params: Params)
 	if type(cost) ~= "number" or cost <= 0 then
 		warn(`[DrawController] coin draw {params.currentDrawId} has invalid Cost`)
 		setDrawButtonEnabled(refs.spin1xButton, false)
-		setDrawButtonEnabled(refs.spin5xButton, false)
 		return
 	end
 
@@ -133,28 +109,14 @@ local function updateCoinDrawPrices(params: Params)
 		refs.price1x.Text = if isCoinDrawCountAllowed(drawConfig, 1) then tostring(cost) else "--"
 	end
 
-	if refs.price5x ~= nil then
-		refs.price5x.Text = if isCoinDrawCountAllowed(drawConfig, 5) then tostring(cost * 5) else "--"
-	end
-
 	if refs.coinsDrawPrice ~= nil then
 		refs.coinsDrawPrice.Text = tostring(totalCost)
-	end
-
-	if refs.gemsDrawPrice ~= nil then
-		refs.gemsDrawPrice.Text = tostring(totalCost)
 	end
 
 	if refs.spin1xButton ~= nil then
 		refs.spin1xButton.Visible = true
 		setButtonTitle(refs.spin1xButton, "Draw x1")
 		setDrawButtonEnabled(refs.spin1xButton, isCoinDrawCountAllowed(drawConfig, 1))
-	end
-
-	if refs.spin5xButton ~= nil then
-		refs.spin5xButton.Visible = true
-		setButtonTitle(refs.spin5xButton, "Draw x5")
-		setDrawButtonEnabled(refs.spin5xButton, isCoinDrawCountAllowed(drawConfig, 5))
 	end
 end
 

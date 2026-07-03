@@ -10,6 +10,7 @@ local Network = Shared:WaitForChild("Network")
 
 local QuestConfig = require(Shared.Config.QuestConfig)
 local Remotes = require(Network:WaitForChild("Remotes"))
+local ResourceConfig = require(Shared.Config.ResourceConfig)
 
 local questUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.QuestUpdated)
 local requestClaimQuestRewardRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestClaimQuestReward)
@@ -52,6 +53,7 @@ type ClaimedMilestones = {
 
 type QuestDefinition = QuestConfig.QuestDefinition
 type QuestKillMilestone = QuestConfig.QuestKillMilestone
+type DrawReward = QuestConfig.DrawReward
 
 type QuestSnapshotEntry = {
 	questId: string,
@@ -61,6 +63,7 @@ type QuestSnapshotEntry = {
 	progress: number,
 	target: number,
 	rewardCoins: number,
+	rewardDraws: { DrawReward }?,
 	claimed: boolean,
 	completed: boolean,
 	claimedMilestones: ClaimedMilestones?,
@@ -148,6 +151,71 @@ local function findGuiButton(parent: Instance, name: string): GuiButton?
 	end
 
 	return nil
+end
+
+local function getDrawRewardLabel(drawReward: DrawReward): string
+	local label = if drawReward.DrawId == "LaunchRobuxMixedDraw" then "PREMIUM DRAW" else "NORMAL DRAW"
+	return `+{drawReward.Count} {label}`
+end
+
+local function formatRewards(rewardCoins: number, rewardDraws: { DrawReward }?): string
+	local parts = {}
+	if rewardCoins > 0 then
+		table.insert(parts, tostring(rewardCoins))
+	end
+	if rewardDraws ~= nil then
+		for _, drawReward in rewardDraws do
+			table.insert(parts, getDrawRewardLabel(drawReward))
+		end
+	end
+
+	return if #parts > 0 then table.concat(parts, "\n") else ""
+end
+
+local function findRewardCountLabel(coins: GuiObject): TextLabel?
+	return findTextLabel(coins, "Count") or findTextLabel(coins, "Amount") or findTextLabel(coins, "Title")
+end
+
+local function getDrawRewardIcon(drawRewards: { DrawReward }?): string?
+	if drawRewards == nil then
+		return nil
+	end
+
+	local firstDrawReward = drawRewards[1]
+	if firstDrawReward == nil then
+		return nil
+	end
+
+	local drawResource = (ResourceConfig.Draws :: any)[firstDrawReward.DrawId]
+	if type(drawResource) ~= "table" or type(drawResource.Icon) ~= "string" then
+		return nil
+	end
+
+	return drawResource.Icon
+end
+
+local function getRewardIcon(rewardCoins: number, rewardDraws: { DrawReward }?): string?
+	if rewardCoins > 0 then
+		return ResourceConfig.Currencies.Coins.Icon
+	end
+
+	return getDrawRewardIcon(rewardDraws)
+end
+
+local function setRewardDisplay(displayRoot: GuiObject, rewardCoins: number, rewardDraws: { DrawReward }?)
+	local rewardText = formatRewards(rewardCoins, rewardDraws)
+	displayRoot.Visible = rewardText ~= ""
+
+	local count = findRewardCountLabel(displayRoot)
+	if count ~= nil then
+		count.Text = rewardText
+	end
+
+	local icon = displayRoot:FindFirstChild("Icon", true)
+	local iconAssetId = getRewardIcon(rewardCoins, rewardDraws)
+	if icon ~= nil and icon:IsA("ImageLabel") and iconAssetId ~= nil then
+		icon.Image = iconAssetId
+	end
 end
 
 local function getQuestPercentage(quest: QuestSnapshotEntry): number
@@ -363,13 +431,7 @@ local function setRewards(rewardsFrame: Frame, quest: QuestSnapshotEntry)
 	local coins = rewardsFrame:FindFirstChild("Coins")
 
 	if coins ~= nil and coins:IsA("GuiObject") then
-		coins.Visible = quest.rewardCoins > 0
-
-		local count = findTextLabel(coins, "Count") or findTextLabel(coins, "Amount") or findTextLabel(coins, "Title")
-
-		if count ~= nil then
-			count.Text = tostring(quest.rewardCoins)
-		end
+		setRewardDisplay(coins, quest.rewardCoins, quest.rewardDraws)
 	end
 
 	local claimButton = findGuiButton(rewardsFrame, "Claim")
@@ -536,16 +598,13 @@ local function renderRewardMilestone(
 
 	connectRewardButtons(clone, quest, milestone, reached, claimed)
 
-	local coins = clone:FindFirstChild("Coins", true)
+	local rewardDisplay = clone:FindFirstChild("Coins", true)
+	if rewardDisplay == nil then
+		rewardDisplay = clone:FindFirstChild("Item", true)
+	end
 
-	if coins ~= nil and coins:IsA("GuiObject") then
-		coins.Visible = milestone.RewardCoins > 0
-
-		local count = findTextLabel(coins, "Count") or findTextLabel(coins, "Amount") or findTextLabel(coins, "Title")
-
-		if count ~= nil then
-			count.Text = tostring(milestone.RewardCoins)
-		end
+	if rewardDisplay ~= nil and rewardDisplay:IsA("GuiObject") then
+		setRewardDisplay(rewardDisplay, milestone.RewardCoins, milestone.RewardDraws)
 	end
 end
 
