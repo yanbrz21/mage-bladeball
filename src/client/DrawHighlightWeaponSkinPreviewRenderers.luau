@@ -191,6 +191,17 @@ local function getLookFrame(position: Vector3, direction: Vector3): CFrame
 	return CFrame.lookAt(position, position + direction.Unit)
 end
 
+local function getRuntimeWorldPlanarDirection(previewRuntime: any, localDirection: Vector3): Vector3
+	local transformLocalDirectionToWorld = previewRuntime.TransformLocalDirectionToWorld
+	if type(transformLocalDirectionToWorld) ~= "function" then
+		return localDirection
+	end
+
+	local worldDirection = transformLocalDirectionToWorld(localDirection)
+	local planarDirection = Vector3.new(worldDirection.X, 0, worldDirection.Z)
+	return if planarDirection.Magnitude > 0 then planarDirection.Unit else localDirection
+end
+
 local function getFireballTier(tierName: string): any
 	for _, tier in CombatConfig.Fireball.Charge.Tiers do
 		if tier.Name == tierName then
@@ -340,6 +351,7 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRunti
 	local playerSize = DrawHighlightPreviewSupport.GetCharacterSize(player)
 	playerPosition = Vector3.new(ABSOLUTE_ZERO_PLAYER_LOCAL_X, playerSize.Y * 0.5, 0)
 	runtime.SetItemLocalCFrame(player, getLookFrame(playerPosition, playerDirection))
+	runtime.FlushLayout()
 	DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 		"absolute_zero",
 		player,
@@ -375,13 +387,15 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRunti
 	local generation = previewGeneration
 	task.spawn(function()
 		while generation == previewGeneration and projectileAnchor:IsDescendantOf(game) do
+			runtime.FlushLayout()
+			local chargeWorldDirection = getRuntimeWorldPlanarDirection(runtime, playerDirection)
 			playFireballCastAnimation(player, nil, true)
 
 			local vfxOptions = {
 				parent = previewWorld,
 				weaponSkinId = "absolute_zero",
 			}
-			PreviewFireballChargeVFX:StartHeldFireballCast(player, playerDirection, vfxOptions)
+			PreviewFireballChargeVFX:StartHeldFireballCast(player, chargeWorldDirection, vfxOptions)
 			local chargeElapsed = 0
 			local completedStageCount = 0
 			while
@@ -391,14 +405,14 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRunti
 			do
 				local deltaTime = RunService.RenderStepped:Wait()
 				chargeElapsed = math.min(chargeElapsed + deltaTime, ABSOLUTE_ZERO_CHARGE_SECONDS)
-				PreviewFireballChargeVFX:UpdateHeldFireballCast(player, playerDirection, chargeElapsed)
+				PreviewFireballChargeVFX:UpdateHeldFireballCast(player, chargeWorldDirection, chargeElapsed)
 				if chargeElapsed >= 1 and completedStageCount < 1 then
 					completedStageCount = 1
-					PreviewFireballChargeVFX:PlayFireballChargeStep(player, playerDirection, vfxOptions)
+					PreviewFireballChargeVFX:PlayFireballChargeStep(player, chargeWorldDirection, vfxOptions)
 				end
 				if chargeElapsed >= 3 and completedStageCount < 2 then
 					completedStageCount = 2
-					PreviewFireballChargeVFX:PlayFireballChargeStep(player, playerDirection, vfxOptions)
+					PreviewFireballChargeVFX:PlayFireballChargeStep(player, chargeWorldDirection, vfxOptions)
 				end
 			end
 
@@ -407,7 +421,7 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRunti
 			end
 
 			playFireballCastAnimation(player, FIREBALL_CAST_HOLD_TIME_SECONDS, false)
-			PreviewFireballChargeVFX:ReleaseHeldFireballCast(player, playerDirection, vfxOptions)
+			PreviewFireballChargeVFX:ReleaseHeldFireballCast(player, chargeWorldDirection, vfxOptions)
 
 			runtime.SetItemLocalCFrame(projectileAnchor, projectileStartFrame)
 			runtime.FlushLayout()

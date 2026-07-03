@@ -50,6 +50,7 @@ type Runtime = {
 	PlayParticlePlaybackLoop: (root: Instance, minimumCycleSeconds: number) -> (),
 	PlayParticlePlaybackOnce: (root: Instance) -> number,
 	SetItemLocalCFrame: (instance: Instance, localCFrame: CFrame) -> (),
+	TransformLocalDirectionToWorld: (localDirection: Vector3) -> Vector3,
 	FlushLayout: () -> (),
 }
 
@@ -604,6 +605,33 @@ function DrawHighlightPreviewRuntime.new(options: RuntimeOptions): Runtime
 				return
 			end
 		end
+	end
+
+	function runtime.TransformLocalDirectionToWorld(localDirection: Vector3): Vector3
+		if localDirection.Magnitude <= 0 then
+			return localDirection
+		end
+
+		local layoutOptions = activeLayoutOptions
+		if layoutOptions == nil then
+			return localDirection.Unit
+		end
+
+		local baseCFrame
+		if useScreenAnchor then
+			local camera = getCurrentCamera()
+			if camera == nil then
+				return localDirection.Unit
+			end
+
+			local distance = layoutOptions.distance or DEFAULT_PREVIEW_DISTANCE
+			baseCFrame = getScreenBaseCFrame(camera, layoutOptions, activeOrbitAngle, distance)
+		else
+			baseCFrame = getWorldBaseCFrame(layoutOptions, activeOrbitAngle)
+		end
+
+		local worldDirection = baseCFrame:VectorToWorldSpace(localDirection)
+		return if worldDirection.Magnitude > 0 then worldDirection.Unit else localDirection.Unit
 	end
 
 	function runtime.FlushLayout()

@@ -97,6 +97,17 @@ local function getLookFrame(position: Vector3, direction: Vector3): CFrame
 	return CFrame.lookAt(position, position + direction.Unit)
 end
 
+local function getRuntimeWorldPlanarDirection(previewRuntime: any, localDirection: Vector3): Vector3
+	local transformLocalDirectionToWorld = previewRuntime.TransformLocalDirectionToWorld
+	if type(transformLocalDirectionToWorld) ~= "function" then
+		return localDirection
+	end
+
+	local worldDirection = transformLocalDirectionToWorld(localDirection)
+	local planarDirection = Vector3.new(worldDirection.X, 0, worldDirection.Z)
+	return if planarDirection.Magnitude > 0 then planarDirection.Unit else localDirection
+end
+
 local function getDeflectShieldLoopAnimationEntry(): any?
 	local characterSet = PlayerAnimationConfig.CharacterSets[PlayerAnimationConfig.DefaultCharacterSetId]
 	if type(characterSet) ~= "table" then
@@ -198,7 +209,7 @@ local function playEmitOnceAtAnchor(path: string, anchor: BasePart, scale: numbe
 	})
 end
 
-local function playShield(rootPart: BasePart, previewRuntime: any)
+local function playShield(rootPart: BasePart, shieldDirection: Vector3, previewRuntime: any)
 	local previewWorld = previewRuntime.GetWorld()
 	if previewWorld == nil then
 		return
@@ -206,8 +217,8 @@ local function playShield(rootPart: BasePart, previewRuntime: any)
 
 	local effect = VFXSystem.Play(DEFLECT_SHIELD_PREVIEW_PATH, {
 		target = rootPart,
-		offset = DEFLECT_SHIELD_OFFSET + SHIELD_DIRECTION * DEFLECT_SHIELD_FRONT_DISTANCE,
-		rotation = getLookFrame(Vector3.zero, SHIELD_DIRECTION),
+		offset = DEFLECT_SHIELD_OFFSET + shieldDirection * DEFLECT_SHIELD_FRONT_DISTANCE,
+		rotation = getLookFrame(Vector3.zero, shieldDirection),
 		followRotation = false,
 		initialEmitFromRate = true,
 		parent = previewWorld,
@@ -274,7 +285,8 @@ function DrawHighlightDeflectShieldPreviewRenderer.Render(previewRuntime: any?)
 		return
 	end
 
-	playShield(rootPart, runtime)
+	runtime.FlushLayout()
+	playShield(rootPart, getRuntimeWorldPlanarDirection(runtime, SHIELD_DIRECTION), runtime)
 
 	local projectileY = playerSize.Y * PROJECTILE_HEIGHT_RATIO
 	local impactPosition = playerPosition + DEFLECT_SHIELD_OFFSET + SHIELD_DIRECTION * DEFLECT_SHIELD_FRONT_DISTANCE

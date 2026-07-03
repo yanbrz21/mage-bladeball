@@ -65,6 +65,10 @@ function DrawHighlightPreviewWorld.SetItemLocalCFrame(instance: Instance, localC
 	defaultRuntime.SetItemLocalCFrame(instance, localCFrame)
 end
 
+function DrawHighlightPreviewWorld.TransformLocalDirectionToWorld(localDirection: Vector3): Vector3
+	return defaultRuntime.TransformLocalDirectionToWorld(localDirection)
+end
+
 function DrawHighlightPreviewWorld.FlushLayout()
 	defaultRuntime.FlushLayout()
 end
