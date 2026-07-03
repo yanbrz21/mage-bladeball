@@ -19,8 +19,6 @@ local QuestController = {
 	Name = "QuestController",
 }
 
-local DEBUG = true
-
 local QUEST_SCROLLING_FRAME_TAG = "QUEST_SCROLLING_FRAME"
 local QUEST_TIMER_TAG = "QUEST_TIMER"
 local QUEST_KILL_BAR_FILL_TAG = "QUEST_KILL_BAR_FILL"
@@ -92,12 +90,6 @@ local lastTimerUpdate = 0
 local isResolvingReferences = false
 local referencesReady = false
 
-local function log(message: string)
-	if DEBUG then
-		print(`[QuestController] {message}`)
-	end
-end
-
 local function getTaggedInstance(tag: string, timeout: number?): Instance?
 	local startedAt = os.clock()
 	local maxWait = timeout or 10
@@ -105,13 +97,8 @@ local function getTaggedInstance(tag: string, timeout: number?): Instance?
 	while os.clock() - startedAt < maxWait do
 		local tagged = CollectionService:GetTagged(tag)
 
-		log(`searching tag {tag}, found {#tagged}`)
-
 		for _, instance in tagged do
-			log(`tag {tag} candidate: {instance:GetFullName()} class={instance.ClassName}`)
-
 			if instance:IsDescendantOf(Workspace) then
-				log(`tag {tag} selected: {instance:GetFullName()}`)
 				return instance
 			end
 		end
@@ -283,7 +270,6 @@ local function setClaimButtonTitle(button: GuiButton, text: string)
 
 	if title ~= nil and title:IsA("TextLabel") then
 		title.Text = text
-		log(`button title set: {button:GetFullName()} -> {text}`)
 	else
 		warn(`[QuestController] missing TextLabel Title inside button {button:GetFullName()}`)
 	end
@@ -373,8 +359,6 @@ local function setClaimButtonVisual(claimButton: GuiButton, reached: boolean, cl
 end
 
 local function fireClaimQuest(quest: QuestSnapshotEntry, milestoneKills: number?)
-	log(`claim requested quest={quest.questId} milestone={milestoneKills or -1}`)
-
 	requestClaimQuestRewardRemote:FireServer({
 		questId = quest.questId,
 		milestoneKills = milestoneKills,
@@ -392,9 +376,7 @@ local function connectRewardButtons(
 	local claimButton = findGuiButton(clone, "Claim")
 	local itemButton = findGuiButton(clone, "Item")
 
-	local function tryClaim(source: string)
-		log(`{source} clicked quest={quest.questId} milestone={milestone.Kills} reached={reached} claimed={claimed}`)
-
+	local function tryClaim()
 		if canClaim then
 			fireClaimQuest(quest, milestone.Kills)
 		end
@@ -406,7 +388,7 @@ local function connectRewardButtons(
 		table.insert(
 			renderConnections,
 			claimButton.Activated:Connect(function()
-				tryClaim("Claim")
+				tryClaim()
 			end)
 		)
 	else
@@ -419,7 +401,7 @@ local function connectRewardButtons(
 		table.insert(
 			renderConnections,
 			itemButton.Activated:Connect(function()
-				tryClaim("Item")
+				tryClaim()
 			end)
 		)
 	else
@@ -594,8 +576,6 @@ local function renderRewardMilestone(
 	)
 	clone.Parent = questRewardItems
 
-	log(`created reward clone {clone:GetFullName()} reached={reached} claimed={claimed}`)
-
 	connectRewardButtons(clone, quest, milestone, reached, claimed)
 
 	local rewardDisplay = clone:FindFirstChild("Coins", true)
@@ -667,9 +647,6 @@ local function renderQuests()
 
 		if questKillBarFill ~= nil then
 			questKillBarFill.Size = UDim2.fromScale(percentage, questKillBarFill.Size.Y.Scale)
-			log(
-				`QUEST_KILL_BAR_FILL updated by daily kills {quest.progress}/{getMilestoneTarget(milestones)} = {percentage}`
-			)
 		end
 
 		local previousPositionScale = 0
@@ -735,8 +712,6 @@ function QuestController:GetReferences()
 
 	isResolvingReferences = true
 	referencesReady = false
-
-	log("GetReferences called")
 
 	questContainer = nil
 	questTimer = nil
@@ -828,8 +803,6 @@ function QuestController:Init(context)
 	self._didInit = true
 	self._context = context
 	self._connections = connections
-
-	log("Init")
 end
 
 function QuestController:Start()
@@ -839,13 +812,9 @@ function QuestController:Start()
 
 	self._didStart = true
 
-	log("Start")
-
 	table.insert(
 		connections,
 		questUpdatedRemote.OnClientEvent:Connect(function(payload)
-			log("QuestUpdated received")
-
 			if type(payload) ~= "table" then
 				return
 			end

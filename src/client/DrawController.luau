@@ -254,7 +254,6 @@ local function connectDrawEntryButton(instance: Instance)
 	table.insert(
 		connections,
 		instance.Activated:Connect(function()
-			print("[DrawController] draw button clicked")
 			DrawController:Open()
 		end)
 	)
@@ -468,12 +467,6 @@ local function setCurrentDraw(drawId: string)
 
 	currentDrawId = drawId
 
-	print(`[DrawController] selected draw: {drawId}`)
-	print(`[DrawController] display name: {drawConfig.DisplayName}`)
-	if type(drawConfig.Cost) == "number" then
-		print(`[DrawController] cost: {drawConfig.Cost}`)
-	end
-
 	updateDrawPrices()
 	updateSpinItems()
 	updateOddsFrame()
@@ -482,7 +475,6 @@ end
 
 local function setCurrentCount(count: number)
 	currentCount = count
-	print(`[DrawController] selected count: {count}`)
 	updateDrawPrices()
 end
 
@@ -549,8 +541,6 @@ local function onDrawButtonClicked(count: number)
 end
 
 local function connectSpinTypeButtons()
-	print("[DrawController] connect spin type buttons")
-
 	syncSpinTypeButtonsWithConfig()
 
 	for _, instance in spinTypesButtons do
@@ -867,8 +857,6 @@ function DrawController:Close()
 end
 
 function DrawController:Start()
-	print("[DrawController] started")
-
 	if self._didStart then
 		return
 	end

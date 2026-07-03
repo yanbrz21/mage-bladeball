@@ -266,7 +266,6 @@ local function connectInventoryEntryButton(instance: Instance)
 	table.insert(
 		connections,
 		instance.Activated:Connect(function()
-			print("[InventoryController] inventory button clicked")
 			InventoryController:Open()
 		end)
 	)
@@ -1819,8 +1818,6 @@ function InventoryController:RenderInventory()
 end
 
 local function setCurrentPage(page: string)
-	print(`[InventoryController] set page: {page}`)
-
 	if page ~= PAGE_ABILITIES and page ~= PAGE_SKINS and page ~= PAGE_SHOP then
 		warn(`[InventoryController] invalid page: {page}`)
 		return
@@ -1962,7 +1959,6 @@ function InventoryController:ConnectScreenControls()
 		table.insert(
 			connections,
 			abilitiesButton.Activated:Connect(function()
-				print("[InventoryController] abilities page clicked")
 				setCurrentPage(PAGE_ABILITIES)
 			end)
 		)
@@ -1973,7 +1969,6 @@ function InventoryController:ConnectScreenControls()
 		table.insert(
 			connections,
 			skinsButton.Activated:Connect(function()
-				print("[InventoryController] skins page clicked")
 				setCurrentPage(PAGE_SKINS)
 			end)
 		)
@@ -1984,7 +1979,6 @@ function InventoryController:ConnectScreenControls()
 		table.insert(
 			connections,
 			shopButton.Activated:Connect(function()
-				print("[InventoryController] shop page clicked")
 				setCurrentPage(PAGE_SHOP)
 			end)
 		)
@@ -2036,20 +2030,12 @@ function InventoryController:BuildScreen()
 
 	self:ConnectScreenControls()
 
-	if abilitiesButton ~= nil then
-		print("[InventoryController] abilities button connected")
-	else
+	if abilitiesButton == nil then
 		warn("[InventoryController] abilities button not found")
 	end
 
-	if skinsButton ~= nil then
-		print("[InventoryController] skins button connected")
-	else
+	if skinsButton == nil then
 		warn("[InventoryController] skins button not found")
-	end
-
-	if shopButton ~= nil then
-		print("[InventoryController] shop button connected")
 	end
 
 	table.insert(
@@ -2129,8 +2115,6 @@ function InventoryController:Init(context)
 	self._context = context
 	self._localPlayer = localPlayer
 	self._connections = connections
-
-	print("[InventoryController] Init")
 end
 
 function InventoryController:GetSnapshot(): InventorySnapshot?
