@@ -34,6 +34,18 @@ local QUEST_SEGMENT_CLONE_ATTRIBUTE = "IS_QUEST_SEGMENT_CLONE"
 
 local DAILY_KILL_QUEST_ID = "daily_kills"
 
+local CLAIM_BUTTON_LOCKED_BG_COLOR = Color3.fromRGB(68, 112, 24)
+local CLAIM_BUTTON_LOCKED_STROKE_COLOR = Color3.fromRGB(36, 58, 22)
+local CLAIM_BUTTON_LOCKED_TEXT_COLOR = Color3.fromRGB(178, 194, 156)
+local CLAIM_BUTTON_LOCKED_TEXT_TRANSPARENCY = 0.1
+local CLAIM_BUTTON_LOCKED_BG_TRANSPARENCY = 0.12
+local CLAIM_BUTTON_LOCKED_GLOW_TRANSPARENCY = 1
+local CLAIM_BUTTON_LOCKED_SHINE_TRANSPARENCY = 1
+
+local CLAIM_BUTTON_CLAIMED_COLOR = Color3.fromRGB(70, 74, 80)
+local CLAIM_BUTTON_CLAIMED_TEXT_COLOR = Color3.fromRGB(165, 170, 176)
+local CLAIM_BUTTON_CLAIMED_TRANSPARENCY = 0.45
+
 type ClaimedMilestones = {
 	[string]: boolean,
 }
@@ -216,6 +228,61 @@ local function setButtonInteractable(button: GuiButton, canClick: boolean)
 	button.AutoButtonColor = canClick
 end
 
+local function dimClaimButton(claimButton: GuiButton)
+	local title = claimButton:FindFirstChild("Title")
+	if title ~= nil and title:IsA("TextLabel") then
+		title.TextColor3 = CLAIM_BUTTON_LOCKED_TEXT_COLOR
+		title.TextTransparency = math.max(title.TextTransparency, CLAIM_BUTTON_LOCKED_TEXT_TRANSPARENCY)
+	end
+
+	for _, descendant in claimButton:GetDescendants() do
+		if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+			if descendant.Name == "Bg" then
+				descendant.ImageColor3 = CLAIM_BUTTON_LOCKED_BG_COLOR
+				descendant.ImageTransparency =
+					math.max(descendant.ImageTransparency, CLAIM_BUTTON_LOCKED_BG_TRANSPARENCY)
+			elseif descendant.Name == "Stroke" then
+				descendant.ImageColor3 = CLAIM_BUTTON_LOCKED_STROKE_COLOR
+			elseif descendant.Name == "Glow" then
+				descendant.ImageTransparency =
+					math.max(descendant.ImageTransparency, CLAIM_BUTTON_LOCKED_GLOW_TRANSPARENCY)
+			elseif descendant.Name == "Shine" then
+				descendant.ImageTransparency =
+					math.max(descendant.ImageTransparency, CLAIM_BUTTON_LOCKED_SHINE_TRANSPARENCY)
+			end
+		elseif descendant:IsA("UIStroke") then
+			descendant.Color = CLAIM_BUTTON_LOCKED_STROKE_COLOR
+			descendant.Transparency = math.max(descendant.Transparency, CLAIM_BUTTON_LOCKED_TEXT_TRANSPARENCY)
+		end
+	end
+end
+
+local function grayClaimButton(claimButton: GuiButton, tintColor: Color3, textColor: Color3, minTransparency: number)
+	claimButton.BackgroundColor3 = tintColor
+	claimButton.BackgroundTransparency = math.max(claimButton.BackgroundTransparency, minTransparency)
+
+	local title = claimButton:FindFirstChild("Title")
+	if title ~= nil and title:IsA("TextLabel") then
+		title.TextColor3 = textColor
+		title.TextTransparency = math.max(title.TextTransparency, 0.15)
+	end
+
+	for _, descendant in claimButton:GetDescendants() do
+		if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+			descendant.ImageColor3 = tintColor
+			descendant.ImageTransparency = math.max(descendant.ImageTransparency, minTransparency)
+		elseif descendant:IsA("Frame") then
+			descendant.BackgroundColor3 = tintColor
+			descendant.BackgroundTransparency = math.max(descendant.BackgroundTransparency, minTransparency)
+		elseif descendant:IsA("UIStroke") then
+			descendant.Color = tintColor
+			descendant.Transparency = math.max(descendant.Transparency, minTransparency)
+		elseif descendant:IsA("UIGradient") then
+			descendant.Enabled = false
+		end
+	end
+end
+
 local function setClaimButtonVisual(claimButton: GuiButton, reached: boolean, claimed: boolean)
 	local canClaim = reached and not claimed
 
@@ -223,10 +290,17 @@ local function setClaimButtonVisual(claimButton: GuiButton, reached: boolean, cl
 
 	if claimed then
 		setClaimButtonTitle(claimButton, "Claimed")
+		grayClaimButton(
+			claimButton,
+			CLAIM_BUTTON_CLAIMED_COLOR,
+			CLAIM_BUTTON_CLAIMED_TEXT_COLOR,
+			CLAIM_BUTTON_CLAIMED_TRANSPARENCY
+		)
 	elseif reached then
 		setClaimButtonTitle(claimButton, "Claim")
 	else
 		setClaimButtonTitle(claimButton, "Locked")
+		dimClaimButton(claimButton)
 	end
 end
 
