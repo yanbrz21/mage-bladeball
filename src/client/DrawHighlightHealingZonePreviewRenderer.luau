@@ -63,6 +63,7 @@ local function playHealingZoneHeal(rootPart: BasePart, previewRuntime: any): boo
 		return false
 	end
 
+	previewRuntime.FlushLayout()
 	local heal = VFXSystem.PlayEmitOnceWithTweens(HEALING_ZONE_PARTICLES_PREVIEW_PATH, {
 		target = rootPart,
 		offset = HEALING_TARGET_OFFSET,
@@ -149,6 +150,7 @@ function DrawHighlightHealingZonePreviewRenderer.Render(previewRuntime: any?)
 		runtime
 	)
 	if circle ~= nil and playerPreview ~= nil then
+		runtime.FlushLayout()
 		local rootPart = DrawHighlightPreviewSupport.GetRootPart(playerPreview)
 		if rootPart ~= nil then
 			addHealingZonePlaybackLoop(circle, playerPreview, rootPart, runtime)
