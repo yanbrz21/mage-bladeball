@@ -290,6 +290,27 @@ function DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes(previewRunt
 	end)
 end
 
+function DrawHighlightWeaponSkinPreviewRenderers.RenderBigBoneStaff(previewRuntime: any?)
+	local runtime = previewRuntime or DrawHighlightPreviewWorld
+	if
+		not runtime.Begin({
+			distance = 30,
+			offset = Vector3.new(0, -0.85, 0),
+			screenOffset = Vector2.new(0, 0.04),
+			rotation = CFrame.Angles(math.rad(-2), math.rad(-10), 0),
+			orbitSpeed = 0.16,
+		})
+	then
+		return
+	end
+
+	DrawHighlightPreviewSupport.CloneWeaponSkinModel(
+		"big_bone_staff",
+		CFrame.new(0, 0.55, 0) * CFrame.Angles(0, math.rad(-38), math.rad(12)),
+		runtime
+	)
+end
+
 function DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRuntime: any?)
 	local runtime = previewRuntime or DrawHighlightPreviewWorld
 	if
@@ -444,6 +465,8 @@ end
 function DrawHighlightWeaponSkinPreviewRenderers.Render(itemId: string, previewRuntime: any?)
 	if itemId == "football_shoes" then
 		DrawHighlightWeaponSkinPreviewRenderers.RenderFootballShoes(previewRuntime)
+	elseif itemId == "big_bone_staff" then
+		DrawHighlightWeaponSkinPreviewRenderers.RenderBigBoneStaff(previewRuntime)
 	elseif itemId == "absolute_zero" then
 		DrawHighlightWeaponSkinPreviewRenderers.RenderAbsoluteZero(previewRuntime)
 	else

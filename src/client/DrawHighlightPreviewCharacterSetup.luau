@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -12,6 +13,7 @@ local PlayerAnimationConfig = require(Config:WaitForChild("PlayerAnimationConfig
 local DrawHighlightPreviewCharacterSetup = {}
 
 local WEAPON_MODEL_NAME = "SwordnWizardEquippedWeapon"
+local PREVIEW_COLLISION_GUARD_ATTRIBUTE = "DrawHighlightPreviewCollisionGuard"
 
 local localPlayer = Players.LocalPlayer
 local playerScripts = localPlayer:WaitForChild("PlayerScripts")
@@ -171,6 +173,51 @@ local function preparePreviewCharacterForAnimation(character: Instance)
 	end
 end
 
+local function setPreviewPartNonColliding(part: BasePart, rootPart: BasePart?)
+	part.Anchored = part == rootPart
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Massless = true
+end
+
+local function enforcePreviewCharacterNoCollision(character: Instance)
+	local rootPart = getRootPart(character)
+	if character:IsA("BasePart") then
+		setPreviewPartNonColliding(character, rootPart)
+	end
+
+	for _, descendant in character:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			setPreviewPartNonColliding(descendant, rootPart)
+		end
+	end
+end
+
+local function installPreviewCollisionGuard(character: Instance)
+	if character:GetAttribute(PREVIEW_COLLISION_GUARD_ATTRIBUTE) == true then
+		return
+	end
+	character:SetAttribute(PREVIEW_COLLISION_GUARD_ATTRIBUTE, true)
+
+	enforcePreviewCharacterNoCollision(character)
+	local descendantAddedConnection = character.DescendantAdded:Connect(function(descendant: Instance)
+		if descendant:IsA("BasePart") then
+			setPreviewPartNonColliding(descendant, getRootPart(character))
+		end
+	end)
+
+	task.spawn(function()
+		while character:IsDescendantOf(game) do
+			enforcePreviewCharacterNoCollision(character)
+			RunService.Heartbeat:Wait()
+		end
+
+		descendantAddedConnection:Disconnect()
+	end)
+end
+
 local function removeExistingPreviewWeapon(character: Instance)
 	local existing = character:FindFirstChild(WEAPON_MODEL_NAME)
 	if existing ~= nil then
@@ -290,6 +337,7 @@ end
 function DrawHighlightPreviewCharacterSetup.Setup(character: Instance)
 	preparePreviewCharacterForAnimation(character)
 	attachEquippedWeaponToPreviewCharacter(character)
+	installPreviewCollisionGuard(character)
 	playPreviewIdle(character)
 end
 
