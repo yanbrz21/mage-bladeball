@@ -262,15 +262,8 @@ local function attachEquippedWeaponToPreviewCharacter(character: Instance)
 	weapon.Parent = character
 
 	local handAttachment = findAttachment(rightHand, skinConfig.HandAttachmentName)
-	local gripAttachment = findAttachment(gripPart, skinConfig.GripAttachmentName)
-	local targetGripCFrame = rightHand.CFrame
-	if handAttachment ~= nil and gripAttachment ~= nil then
-		targetGripCFrame = handAttachment.WorldCFrame * gripAttachment.CFrame:Inverse()
-	elseif handAttachment ~= nil and weapon:IsA("Tool") then
-		targetGripCFrame = handAttachment.WorldCFrame * weapon.Grip
-	elseif handAttachment ~= nil then
-		targetGripCFrame = handAttachment.WorldCFrame
-	end
+	local handCFrame = if handAttachment ~= nil then handAttachment.WorldCFrame else rightHand.CFrame
+	local targetGripCFrame = if weapon:IsA("Tool") then handCFrame * weapon.Grip else handCFrame
 	pivotInstanceToPartCFrame(weapon, gripPart, targetGripCFrame)
 
 	local weld = Instance.new("WeldConstraint")

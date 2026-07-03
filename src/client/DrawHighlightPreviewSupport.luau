@@ -293,21 +293,14 @@ function DrawHighlightPreviewSupport.AttachWeaponSkinToCharacter(
 	weapon.Parent = character
 
 	local handAttachmentName = if type(skinConfig) == "table" then skinConfig.HandAttachmentName else nil
-	local gripAttachmentName = if type(skinConfig) == "table" then skinConfig.GripAttachmentName else nil
 	local handAttachment = DrawHighlightPreviewCharacterSetup.FindAttachment(rightHand, handAttachmentName)
-	local gripAttachment = if type(gripAttachmentName) == "string"
-		then weapon:FindFirstChild(gripAttachmentName, true)
-		else nil
-	local targetCFrame = rightHand.CFrame
+	local handCFrame = if handAttachment ~= nil then handAttachment.WorldCFrame else rightHand.CFrame
+	local targetCFrame = handCFrame
 
-	if handAttachment ~= nil and gripAttachment ~= nil and gripAttachment:IsA("Attachment") then
-		targetCFrame = handAttachment.WorldCFrame * gripAttachment.CFrame:Inverse()
-	elseif handAttachment ~= nil and weapon:IsA("Tool") then
-		targetCFrame = handAttachment.WorldCFrame * weapon.Grip
-		warn(`[DrawController] weapon skin {itemId} grip attachment missing; using Tool.Grip alignment`)
+	if weapon:IsA("Tool") then
+		targetCFrame = handCFrame * weapon.Grip
 	elseif handAttachment ~= nil then
-		targetCFrame = handAttachment.WorldCFrame
-		warn(`[DrawController] weapon skin {itemId} grip attachment missing; using hand attachment alignment`)
+		warn(`[DrawController] weapon skin {itemId} is not a Tool; using hand attachment alignment`)
 	else
 		warn(`[DrawController] weapon skin {itemId} hand attachment missing; using RightHand alignment`)
 	end
