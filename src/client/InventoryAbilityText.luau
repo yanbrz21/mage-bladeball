@@ -90,7 +90,21 @@ function InventoryAbilityText.GetUpgradeSummary(abilityId: string, currentLevel:
 	addUpgradeChange(changes, "Distance", currentData.Distance, nextData.Distance, formatStatNumber)
 	addUpgradeChange(changes, "Radius", currentData.Radius, nextData.Radius, formatStatNumber)
 	addUpgradeChange(changes, "Damage", currentData.Damage, nextData.Damage, formatStatNumber)
+	addUpgradeChange(
+		changes,
+		"Damage taken",
+		currentData.DamageTakenMultiplier,
+		nextData.DamageTakenMultiplier,
+		formatPercentMultiplier
+	)
 	addUpgradeChange(changes, "Knockback", currentData.KnockbackDistance, nextData.KnockbackDistance, formatStatNumber)
+	addUpgradeChange(
+		changes,
+		"Knockback upward",
+		currentData.KnockbackUpwardVelocity,
+		nextData.KnockbackUpwardVelocity,
+		formatStatNumber
+	)
 	addUpgradeChange(
 		changes,
 		"Knockback taken",
@@ -104,6 +118,13 @@ function InventoryAbilityText.GetUpgradeSummary(abilityId: string, currentLevel:
 		currentData.WalkSpeedMultiplier,
 		nextData.WalkSpeedMultiplier,
 		formatPercentMultiplier
+	)
+	addUpgradeChange(
+		changes,
+		"Attack invulnerability",
+		currentData.InvulnerabilitySeconds,
+		nextData.InvulnerabilitySeconds,
+		formatSeconds
 	)
 	addUpgradeChange(
 		changes,
@@ -129,13 +150,28 @@ function InventoryAbilityText.GetUpgradeSummary(abilityId: string, currentLevel:
 		formatStatNumber
 	)
 	addUpgradeChange(changes, "Heal amount", currentData.HealAmount, nextData.HealAmount, formatStatNumber)
+	addUpgradeChange(
+		changes,
+		"Charge speed",
+		currentData.ChargeSpeedMultiplier,
+		nextData.ChargeSpeedMultiplier,
+		formatPercentMultiplier
+	)
 	addUpgradeChange(changes, "Wall scale", currentData.WallScale, nextData.WallScale, formatPercentMultiplier)
-
-	if currentData.EnterVelocityZero ~= nextData.EnterVelocityZero then
-		local before = if currentData.EnterVelocityZero == true then "enabled" else "disabled"
-		local after = if nextData.EnterVelocityZero == true then "enabled" else "disabled"
-		table.insert(changes, `Movement stop: {before} -> {after}`)
-	end
+	addUpgradeChange(
+		changes,
+		"Self transparency",
+		currentData.SelfTransparency,
+		nextData.SelfTransparency,
+		formatPercentMultiplier
+	)
+	addUpgradeChange(
+		changes,
+		"Enemy transparency",
+		currentData.OtherTransparency,
+		nextData.OtherTransparency,
+		formatPercentMultiplier
+	)
 
 	if nextLevel == 5 then
 		local level5Text = getStringField(getAbilityInventoryItem(abilityId), "Level5AwakeningDescription")
@@ -145,10 +181,10 @@ function InventoryAbilityText.GetUpgradeSummary(abilityId: string, currentLevel:
 	end
 
 	if #changes == 0 then
-		return `Level {currentLevel} -> {nextLevel}: no visible stat change.`
+		return "No visible stat change."
 	end
 
-	return `Level {currentLevel} -> {nextLevel}\n` .. table.concat(changes, "\n")
+	return table.concat(changes, "\n")
 end
 
 return table.freeze(InventoryAbilityText)
