@@ -5,6 +5,8 @@ local DrawHighlightDeflectShieldPreviewRenderer =
 local DrawHighlightHealingZonePreviewRenderer =
 	require(script.Parent:WaitForChild("DrawHighlightHealingZonePreviewRenderer"))
 local DrawHighlightIceWallPreviewRenderer = require(script.Parent:WaitForChild("DrawHighlightIceWallPreviewRenderer"))
+local DrawHighlightInvisibilityPreviewRenderer =
+	require(script.Parent:WaitForChild("DrawHighlightInvisibilityPreviewRenderer"))
 local DrawHighlightPreviewSupport = require(script.Parent:WaitForChild("DrawHighlightPreviewSupport"))
 local DrawHighlightWeaponSkinPreviewRenderers =
 	require(script.Parent:WaitForChild("DrawHighlightWeaponSkinPreviewRenderers"))
@@ -18,6 +20,7 @@ local function clearRenderers()
 	DrawHighlightDeflectShieldPreviewRenderer.Clear()
 	DrawHighlightHealingZonePreviewRenderer.Clear()
 	DrawHighlightIceWallPreviewRenderer.Clear()
+	DrawHighlightInvisibilityPreviewRenderer.Clear()
 	DrawHighlightWeaponSkinPreviewRenderers.Clear()
 end
 
@@ -48,6 +51,8 @@ function DrawHighlightPreviewRenderers.Render(category: string, itemId: string, 
 			DrawHighlightHealingZonePreviewRenderer.Render(previewRuntime)
 		elseif itemId == "deflect_shield" then
 			DrawHighlightDeflectShieldPreviewRenderer.Render(previewRuntime)
+		elseif itemId == "invisibility" then
+			DrawHighlightInvisibilityPreviewRenderer.Render(previewRuntime)
 		else
 			warn(`[DrawController] no highlight preview defined for ability: {itemId}`)
 		end

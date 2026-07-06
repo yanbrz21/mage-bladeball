@@ -35,6 +35,7 @@ export type Refs = {
 	rollScrollingFrame: ScrollingFrame?,
 	rollExplanationText: TextLabel?,
 	skipDrawButton: TextButton?,
+	closeButton: GuiObject?,
 }
 
 export type Callbacks = {
@@ -77,6 +78,7 @@ function DrawRollSequence.new(callbacks: Callbacks): DrawRollSequence
 			rollScrollingFrame = nil,
 			rollExplanationText = nil,
 			skipDrawButton = nil,
+			closeButton = nil,
 		},
 		_callbacks = callbacks,
 		_isDrawing = false,
@@ -133,6 +135,10 @@ function DrawRollSequence:_setSkipButtonVisible(visible: boolean)
 	setGuiVisible(self._refs.skipDrawButton, visible)
 end
 
+function DrawRollSequence:_setCloseButtonVisible(visible: boolean)
+	setGuiVisible(self._refs.closeButton, visible)
+end
+
 function DrawRollSequence:_setExplanation(text: string)
 	local rollExplanationText = self._refs.rollExplanationText
 	if rollExplanationText ~= nil then
@@ -155,6 +161,7 @@ function DrawRollSequence:BeginWaiting(showRollUi: boolean)
 	self._isDrawing = true
 	self._isWaitingForDrawResult = true
 	self._isRollFinished = false
+	self:_setCloseButtonVisible(false)
 
 	if showRollUi then
 		setGuiVisible(self._refs.chooseDrawFrame, false)
@@ -180,6 +187,7 @@ function DrawRollSequence:ResetToChoose(refresh: boolean?)
 	setGuiVisible(self._refs.chooseDrawFrame, true)
 	self:_setSkipButtonTitle("SKIP")
 	self:_setSkipButtonVisible(false)
+	self:_setCloseButtonVisible(true)
 	self:_setExplanation("")
 
 	if refresh == true then
@@ -195,6 +203,7 @@ function DrawRollSequence:ResetAfterFailure()
 	setGuiVisible(self._refs.chooseDrawFrame, true)
 	setGuiVisible(self._refs.rngFrame, false)
 	self:_setSkipButtonVisible(false)
+	self:_setCloseButtonVisible(true)
 end
 
 function DrawRollSequence:ResetAfterEmptyResult()
@@ -202,6 +211,7 @@ function DrawRollSequence:ResetAfterEmptyResult()
 	self._isRolling = false
 	self._isWaitingForDrawResult = false
 	self:_setSkipButtonVisible(false)
+	self:_setCloseButtonVisible(true)
 end
 
 function DrawRollSequence:_fireRollTick()
@@ -447,6 +457,7 @@ function DrawRollSequence:Start(result: SkinDrawResultPayload): boolean
 	setGuiVisible(self._refs.rngFrame, true)
 	self:_setSkipButtonTitle("SKIP")
 	self:_setSkipButtonVisible(false)
+	self:_setCloseButtonVisible(false)
 	self:_setExplanation("Rolling...")
 
 	task.spawn(function()

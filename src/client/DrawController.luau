@@ -702,6 +702,7 @@ function DrawController:GetReferences()
 		rollScrollingFrame = rollScrollingFrame,
 		rollExplanationText = rollExplanationText,
 		skipDrawButton = skipDrawButton,
+		closeButton = drawClose,
 	})
 end
 
