@@ -6,19 +6,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
 
 local AbilityLevelScaling = require(Config:WaitForChild("AbilityLevelScaling"))
+local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 
 local InventoryAbilityText = {}
-
-local LEVEL_5_UPGRADE_TEXT_BY_ABILITY_ID = {
-	dash = "DASH: Greatly increases dash speed.",
-	barrier = "BARRIER: Greatly strengthens knockback resistance while blocking.",
-	stone_form = "GOLDEN BODY: Immediately cancels knockback.",
-	qi_burst = "QI BURST: Greatly increases the burst knockback.",
-	sprint = "SPRINT: Greatly reduces cooldown.",
-	double_jump = "DOUBLE JUMP: Greatly improves movement control while airborne.",
-	healing_zone = "HEALING ZONE: Unlocks a restorative area that heals allies over time.",
-	ice_wall = "ICE WALL: Unlocks a wall that blocks enemies and enemy fireballs.",
-} :: { [string]: string }
 
 local function formatStatNumber(value: number): string
 	if math.abs(value - math.round(value)) < 0.001 then
@@ -44,33 +34,30 @@ local function getResolvedAbilityData(abilityId: string, level: number): any?
 	return AbilityLevelScaling.ResolveAbilityData(abilityId, level)
 end
 
-function InventoryAbilityText.GetEffectDescription(abilityId: string, level: number): string
-	local abilityData = getResolvedAbilityData(abilityId, level)
-	if abilityData == nil then
-		return "Effect details are unavailable."
+local function getAbilityInventoryItem(abilityId: string): any?
+	local abilityCategory = InventoryConfig.Categories.Ability
+	if type(abilityCategory) ~= "table" or type(abilityCategory.Items) ~= "table" then
+		return nil
 	end
 
-	if abilityId == "dash" then
-		return "Dash in your current movement direction."
-	elseif abilityId == "barrier" then
-		return "Create a barrier that blocks damage and reduces knockback."
-	elseif abilityId == "stone_form" then
-		return "Enter Golden Body, becoming immune to damage and knockback for a short time."
-	elseif abilityId == "qi_burst" then
-		return "Release a burst of qi that damages and knocks back nearby enemies."
-	elseif abilityId == "sprint" then
-		return "Move faster for a short time."
-	elseif abilityId == "double_jump" then
-		return "Unlock a second jump while airborne."
-	elseif abilityId == "deflect_shield" then
-		return "Raise a shield that deflects incoming fireballs."
-	elseif abilityId == "healing_zone" then
-		return "Create a healing zone that restores health over time."
-	elseif abilityId == "ice_wall" then
-		return "Raise an ice wall that blocks enemies and enemy fireballs. Your own fireballs pass through it."
+	return abilityCategory.Items[abilityId]
+end
+
+local function getStringField(itemConfig: any?, fieldName: string): string?
+	if type(itemConfig) ~= "table" then
+		return nil
 	end
 
-	return "Use this skill to gain a combat advantage."
+	local value = itemConfig[fieldName]
+	if type(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	return value
+end
+
+function InventoryAbilityText.GetEffectDescription(abilityId: string, _level: number): string
+	return getStringField(getAbilityInventoryItem(abilityId), "EffectDescription") or "Effect details are unavailable."
 end
 
 local function addUpgradeChange(
@@ -151,7 +138,7 @@ function InventoryAbilityText.GetUpgradeSummary(abilityId: string, currentLevel:
 	end
 
 	if nextLevel == 5 then
-		local level5Text = LEVEL_5_UPGRADE_TEXT_BY_ABILITY_ID[abilityId]
+		local level5Text = getStringField(getAbilityInventoryItem(abilityId), "Level5AwakeningDescription")
 		if level5Text ~= nil then
 			table.insert(changes, level5Text)
 		end
