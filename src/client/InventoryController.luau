@@ -26,6 +26,8 @@ local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
 
 local requestEquipItemRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestEquipItem)
+local requestInventorySnapshotRemote =
+	Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestInventorySnapshot)
 local requestUpgradeAbilityRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestUpgradeAbility)
 
 local inventoryUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.InventoryUpdated)
@@ -2069,6 +2071,7 @@ function InventoryController:BuildScreen()
 			inventoryChangedEvent:Fire(currentInventorySnapshot, payload)
 		end)
 	)
+	requestInventorySnapshotRemote:FireServer()
 
 	table.insert(
 		connections,
@@ -2171,6 +2174,7 @@ function InventoryController:Open()
 		currentPage = PAGE_ABILITIES
 	end
 
+	requestInventorySnapshotRemote:FireServer()
 	self:RenderInventory()
 	updateSelectedActionButtons()
 end
