@@ -4,6 +4,8 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = Shared:WaitForChild("Config")
@@ -46,6 +48,9 @@ local DRAW_ID_ATTRIBUTE = "ID"
 local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
 local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
 local SPIN_TYPE_CONNECTED_ATTRIBUTE = "ParabellumSpinTypeConnected"
+local SIDE_MENU_MOBILE_SCALE_NAME = "ParabellumMobileScale"
+local SIDE_MENU_MOBILE_SCALE = 1.5
+local SIDE_MENU_SMALL_VIEWPORT_THRESHOLD = 520
 
 local DRAW_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumDrawEntryConnected"
 local NORMAL_DRAW_ID = "NormalDraw"
@@ -226,6 +231,45 @@ local function setHudVisible(visible: boolean)
 	setGuiVisible(HUD_SCREENGUI, visible)
 end
 
+local function shouldUseMobileSideMenuScale(): boolean
+	local camera = Workspace.CurrentCamera
+	local viewportSize = if camera ~= nil then camera.ViewportSize else Vector2.zero
+	return UserInputService.TouchEnabled
+		or math.min(viewportSize.X, viewportSize.Y) <= SIDE_MENU_SMALL_VIEWPORT_THRESHOLD
+end
+
+local function applySideMenuMobileScale(instance: Instance?)
+	if instance == nil or not instance:IsA("GuiObject") then
+		return
+	end
+
+	local existingScale = instance:FindFirstChild(SIDE_MENU_MOBILE_SCALE_NAME)
+	local scale: UIScale
+	if existingScale ~= nil then
+		if not existingScale:IsA("UIScale") then
+			warn(`[DrawController] {SIDE_MENU_MOBILE_SCALE_NAME} must be a UIScale under {instance:GetFullName()}`)
+			return
+		end
+		scale = existingScale
+	else
+		scale = Instance.new("UIScale")
+		scale.Name = SIDE_MENU_MOBILE_SCALE_NAME
+		scale.Parent = instance
+	end
+
+	scale.Scale = if shouldUseMobileSideMenuScale() then SIDE_MENU_MOBILE_SCALE else 1
+end
+
+local function refreshSideMenuMobileScales()
+	applySideMenuMobileScale(HUD_SCREENGUI)
+
+	for _, instance in CollectionService:GetTagged("SIDEMENU") do
+		if instance:IsDescendantOf(playerGui) then
+			applySideMenuMobileScale(instance)
+		end
+	end
+end
+
 local function isLocalPlayerLockedForRound(): boolean
 	local playerState = localPlayer:GetAttribute("PlayerState")
 	return playerState == MatchConfig.PlayerStates.AliveInRound or playerState == MatchConfig.PlayerStates.DeadInRound
@@ -287,6 +331,7 @@ local function handleSideMenuAdded(instance: Instance)
 
 	HUD_SCREENGUI = instance :: any
 	preventGuiResetOnSpawn(instance)
+	applySideMenuMobileScale(instance)
 	setHudVisible(true)
 	syncDrawEntryButtons()
 end
@@ -707,6 +752,7 @@ function DrawController:GetReferences()
 	rollExplanationText = getReferenceByTag("ROLL_EXPLANATION_TEXT") :: TextLabel?
 
 	HUD_SCREENGUI = getReferenceByTag("SIDEMENU") :: ScreenGui?
+	applySideMenuMobileScale(HUD_SCREENGUI)
 
 	local foundDrawClose = getOptionalReferenceByTag("DRAW_CLOSE")
 		or getOptionalReferenceByTag("DRAWCLOSE")
@@ -770,6 +816,30 @@ function DrawController:BuildUI()
 	table.insert(connections, CollectionService:GetInstanceAddedSignal("DRAW_BUTTON"):Connect(connectDrawEntryButton))
 	table.insert(connections, CollectionService:GetInstanceAddedSignal("SPIN_SCREEN"):Connect(handleDrawScreenAdded))
 	table.insert(connections, CollectionService:GetInstanceAddedSignal("SIDEMENU"):Connect(handleSideMenuAdded))
+	table.insert(
+		connections,
+		UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(refreshSideMenuMobileScales)
+	)
+	if Workspace.CurrentCamera ~= nil then
+		table.insert(
+			connections,
+			Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(refreshSideMenuMobileScales)
+		)
+	end
+	table.insert(
+		connections,
+		Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+			refreshSideMenuMobileScales()
+			if Workspace.CurrentCamera ~= nil then
+				table.insert(
+					connections,
+					Workspace.CurrentCamera
+						:GetPropertyChangedSignal("ViewportSize")
+						:Connect(refreshSideMenuMobileScales)
+				)
+			end
+		end)
+	)
 
 	connectDrawClose()
 
