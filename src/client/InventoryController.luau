@@ -47,6 +47,7 @@ type ClientBootContext = {
 local InventoryController = {
 	Name = "InventoryController",
 	_context = nil :: ClientBootContext?,
+	_redDot = nil :: any?,
 }
 
 local CATEGORY_ABILITY = "Ability"
@@ -87,8 +88,8 @@ local PROGRESS_FILL_COLOR = Color3.fromRGB(97, 235, 164)
 local PROGRESS_READY_FILL_COLOR = Color3.fromRGB(248, 210, 86)
 local ACTION_BUTTON_DISABLED_TEXT_COLOR = Color3.fromRGB(150, 150, 150)
 local ACTION_BUTTON_DISABLED_IMAGE_COLOR = Color3.fromRGB(105, 105, 105)
-local ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0.105)
-local HIDDEN_ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0)
+local ACTION_BUTTON_SIZE = UDim2.fromScale(0.725853252, 0.105)
+local HIDDEN_ACTION_BUTTON_SIZE = UDim2.fromScale(0.725853252, 0)
 local VFX_DESCRIPTION_TEXT_COLOR = "#78D8FF"
 local SHOP_REWARD_TEXT_COLOR = "#FFD447"
 
@@ -123,6 +124,7 @@ type InventorySnapshot = {
 	equippedAbility: string,
 	ownedWeaponSkins: { string },
 	equippedWeaponSkin: string,
+	unseenItems: { [string]: boolean },
 	changedAt: number,
 }
 
@@ -513,6 +515,18 @@ local function getAbilityUpgradeCost(abilityId: string): number?
 	return if type(cost) == "number" and cost > 0 then math.floor(cost) else nil
 end
 
+InventoryController._redDot = require(Parabellum:WaitForChild("InventoryRedDot")).new({
+	network = Network,
+	remotes = Remotes,
+	getSnapshot = function()
+		return currentInventorySnapshot
+	end,
+	getAbilityUpgradeCost = getAbilityUpgradeCost,
+	getAbilityFragments = getAbilityFragments,
+	abilityCategory = CATEGORY_ABILITY,
+	weaponSkinCategory = CATEGORY_WEAPON_SKIN,
+})
+
 local function getInventoryItemConfig(category: string, itemId: string): any?
 	local categories = InventoryConfig.Categories :: any
 	local categoryConfig = categories[category]
@@ -743,7 +757,7 @@ do
 		}
 	end
 
-	local function formatGamePassRewardText(gamePassConfig: any): string
+	local function formatGamePassRewardText(_gamePassConfig: any): string
 		return "GamePass"
 	end
 
@@ -1396,6 +1410,9 @@ local function updateUpgradeButton()
 	abilityUpgradeButton.Size = if shouldShow then ACTION_BUTTON_SIZE else HIDDEN_ACTION_BUTTON_SIZE
 
 	if not shouldShow or selectedItemId == nil then
+		if InventoryController._redDot ~= nil then
+			InventoryController._redDot:SetVisible(abilityUpgradeButton, false)
+		end
 		setUpgradeButtonEnabled(false)
 		setUpgradeButtonText("UPGRADE")
 		return
@@ -1408,11 +1425,17 @@ local function updateUpgradeButton()
 	local cost = getAbilityUpgradeCost(abilityId)
 
 	if cost == nil or level >= maxLevel then
+		if InventoryController._redDot ~= nil then
+			InventoryController._redDot:SetVisible(abilityUpgradeButton, false)
+		end
 		setUpgradeButtonText(`MAX LV {maxLevel}`)
 		setUpgradeButtonEnabled(false)
 		return
 	end
 
+	if InventoryController._redDot ~= nil then
+		InventoryController._redDot:SetVisible(abilityUpgradeButton, fragments >= cost)
+	end
 	setUpgradeButtonText(`UPGRADE {fragments}/{cost}`)
 	setUpgradeButtonEnabled(fragments >= cost)
 end
@@ -1420,6 +1443,9 @@ end
 updateSelectedActionButtons = function()
 	updateEquipButton()
 	updateUpgradeButton()
+	if InventoryController._redDot ~= nil then
+		InventoryController._redDot:UpdateInventoryEntryBadges(playerGui, getOwnedItems)
+	end
 end
 
 local function setCloneAbilityProgress(clone: GuiObject, category: string, itemId: string, owned: boolean)
@@ -1519,6 +1545,13 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 
 	if inventoryItemInfo ~= nil then
 		inventoryItemInfo.Visible = true
+	end
+
+	if owned then
+		if InventoryController._redDot ~= nil then
+			InventoryController._redDot:MarkInventoryItemSeen(category, itemId)
+		end
+		InventoryController:RenderInventory()
 	end
 
 	updateSelectedActionButtons()
@@ -1826,6 +1859,12 @@ local function createInventoryItem(row: Frame, category: string, itemId: string,
 	setCloneEquippedVisible(clone, equipped)
 	setCloneAbilityLevelBadge(clone, category, itemId, owned)
 	setCloneAbilityProgress(clone, category, itemId, owned)
+	if InventoryController._redDot ~= nil then
+		InventoryController._redDot:SetVisible(
+			clone,
+			InventoryController._redDot:ShouldShowItemBadge(category, itemId, owned)
+		)
+	end
 
 	local clickable = getClickableFromClone(clone)
 
