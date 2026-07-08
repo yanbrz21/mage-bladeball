@@ -90,6 +90,7 @@ local ACTION_BUTTON_DISABLED_IMAGE_COLOR = Color3.fromRGB(105, 105, 105)
 local ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0.105)
 local HIDDEN_ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0)
 local VFX_DESCRIPTION_TEXT_COLOR = "#78D8FF"
+local SHOP_REWARD_TEXT_COLOR = "#FFD447"
 
 local ORIGINAL_TEXT_COLOR_ATTRIBUTE = "OriginalActionTextColor"
 local ORIGINAL_TEXT_TRANSPARENCY_ATTRIBUTE = "OriginalActionTextTransparency"
@@ -566,6 +567,24 @@ local function formatVFXDescriptionLine(text: string): string
 	return `<font color="{VFX_DESCRIPTION_TEXT_COLOR}">{escapeRichText(text)}</font>`
 end
 
+local function formatShopRewardText(product: ShopProduct): string
+	local rewardText = escapeRichText(product.rewardText)
+	if product.kind == "DeveloperProduct" then
+		return `<font color="{SHOP_REWARD_TEXT_COLOR}">{rewardText}</font>`
+	end
+
+	return rewardText
+end
+
+local function formatShopDescription(product: ShopProduct): string
+	local rewardText = formatShopRewardText(product)
+	if product.description == "" then
+		return rewardText
+	end
+
+	return `{rewardText}\n{escapeRichText(product.description)}`
+end
+
 local function getWeaponSkinFireballVFXConfig(itemId: string): any?
 	local weaponSkinVFX = (WeaponSkinVFXConfig :: any).WeaponSkins
 	if type(weaponSkinVFX) ~= "table" then
@@ -725,17 +744,13 @@ do
 	end
 
 	local function formatGamePassRewardText(gamePassConfig: any): string
-		local multiplier = gamePassConfig.Multiplier
-		if type(multiplier) == "number" and multiplier > 1 then
-			return `{multiplier}X coins`
-		end
-
 		return "GamePass"
 	end
 
 	local function formatGamePassDescription(gamePassConfig: any): string
-		if type(gamePassConfig.Multiplier) == "number" and gamePassConfig.Multiplier > 1 then
-			return ""
+		local description = gamePassConfig.Description
+		if type(description) == "string" and description ~= "" then
+			return description
 		end
 
 		local appliesTo = gamePassConfig.AppliesTo
@@ -1527,10 +1542,8 @@ local function selectShopProduct(productKey: string)
 	end
 
 	if itemDescription ~= nil then
-		itemDescription.RichText = false
-		itemDescription.Text = if product.description == ""
-			then product.rewardText
-			else `{product.rewardText}\n{product.description}`
+		itemDescription.RichText = true
+		itemDescription.Text = formatShopDescription(product)
 	end
 
 	setImageAsset(itemImage, product.iconAssetId)
