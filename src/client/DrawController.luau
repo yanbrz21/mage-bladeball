@@ -38,8 +38,10 @@ local inventoryUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.Server
 
 local DrawController = {
 	Name = "DrawController",
+	_context = nil :: any,
 }
 
+local COIN_PACK_PRODUCT_KEY = "coins_small"
 local DRAW_ID_ATTRIBUTE = "ID"
 local AUDIO_CLICK_EVENT_ATTRIBUTE = "AudioClickEvent"
 local TAB_SWITCH_AUDIO_EVENT = "TabSwitch"
@@ -108,6 +110,7 @@ local connections: { RBXScriptConnection } = {}
 local didBuildUI = false
 local stopWorldEntryPrompts: (() -> ())?
 local worldHighlightPreviewManager: any?
+local closeDrawUi: () -> ()
 
 function DrawController:Init(context)
 	if self._didInit then
@@ -496,6 +499,28 @@ local function getDrawResultMessage(result: SkinDrawResultPayload): string
 	return result.code
 end
 
+local function openCoinPackShop()
+	local context = DrawController._context
+	local inventoryController = if context ~= nil then context.Controllers.InventoryController else nil
+	if type(inventoryController) ~= "table" then
+		warn("[DrawController] InventoryController is unavailable for coin pack redirect")
+		return
+	end
+
+	closeDrawUi()
+
+	local openShopProduct = inventoryController.OpenShopProduct
+	if type(openShopProduct) == "function" then
+		openShopProduct(inventoryController, COIN_PACK_PRODUCT_KEY)
+		return
+	end
+
+	local openInventory = inventoryController.Open
+	if type(openInventory) == "function" then
+		openInventory(inventoryController)
+	end
+end
+
 local function handleSkinDrawResult(payload: SkinDrawResultPayload)
 	if payload.balanceAfter ~= nil then
 		currentBalance = payload.balanceAfter
@@ -508,6 +533,9 @@ local function handleSkinDrawResult(payload: SkinDrawResultPayload)
 		rollSequence:ResetAfterFailure()
 
 		warn(`[DrawController] draw failed: {getDrawResultMessage(payload)}`)
+		if payload.code == "InsufficientCoins" then
+			openCoinPackShop()
+		end
 		return
 	end
 
@@ -537,6 +565,7 @@ local function onDrawButtonClicked(count: number)
 		end,
 		setCurrentCount = setCurrentCount,
 		updateDrawPrices = updateDrawPrices,
+		onInsufficientCoins = openCoinPackShop,
 	})
 end
 
@@ -581,7 +610,7 @@ local function connectSpinTypeButtons()
 	updateSpinTypeButtonsVisual()
 end
 
-local function closeDrawUi()
+closeDrawUi = function()
 	clearHighlightPreview()
 	DrawPresentationState.Disable()
 	setScreenEnabled(false)

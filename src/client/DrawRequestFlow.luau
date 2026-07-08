@@ -20,6 +20,7 @@ export type Params = {
 	getBalance: () -> number,
 	setCurrentCount: (count: number) -> (),
 	updateDrawPrices: () -> (),
+	onInsufficientCoins: (() -> ())?,
 }
 
 local function requestCoinDraw(params: Params, drawConfig: any, count: number)
@@ -34,6 +35,9 @@ local function requestCoinDraw(params: Params, drawConfig: any, count: number)
 	local currentBalance = params.getBalance()
 	if currentBalance < cost then
 		warn(`[DrawController] not enough coins. need {math.max(0, cost - currentBalance)} more coins`)
+		if params.onInsufficientCoins ~= nil then
+			params.onInsufficientCoins()
+		end
 		return
 	end
 

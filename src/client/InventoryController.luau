@@ -2329,6 +2329,30 @@ function InventoryController:Open()
 	updateSelectedActionButtons()
 end
 
+function InventoryController:OpenShopProduct(productKey: string): boolean
+	if isLocalPlayerLockedForRound() then
+		closeInventoryUi()
+		updateInventoryEntryVisibility()
+		return false
+	end
+
+	refreshScreenReferences()
+	currentPage = PAGE_SHOP
+	setScreenVisible(true)
+	requestInventorySnapshotRemote:FireServer()
+	self:RenderInventory()
+
+	if ShopProducts.GetEntry(productKey) == nil then
+		warn(`[InventoryController] shop product not found: {productKey}`)
+		clearSelectedItem()
+		updateSelectedActionButtons()
+		return false
+	end
+
+	selectShopProduct(productKey)
+	return true
+end
+
 function InventoryController:Close()
 	closeInventoryUi()
 end
