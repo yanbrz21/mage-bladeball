@@ -3,6 +3,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -51,6 +52,7 @@ local SPIN_TYPE_CONNECTED_ATTRIBUTE = "ParabellumSpinTypeConnected"
 local SIDE_MENU_MOBILE_SCALE_NAME = "ParabellumMobileScale"
 local SIDE_MENU_MOBILE_SCALE = 1.5
 local SIDE_MENU_SMALL_VIEWPORT_THRESHOLD = 520
+local TOUCH_CLOSE_RESTORE_FALLBACK_SECONDS = 0.35
 
 local DRAW_ENTRY_CONNECTED_ATTRIBUTE = "ParabellumDrawEntryConnected"
 local NORMAL_DRAW_ID = "NormalDraw"
@@ -115,7 +117,8 @@ local connections: { RBXScriptConnection } = {}
 local didBuildUI = false
 local stopWorldEntryPrompts: (() -> ())?
 local worldHighlightPreviewManager: any?
-local closeDrawUi: () -> ()
+local closeDrawUi: (InputObject?) -> ()
+local closeRestoreToken = 0
 
 function DrawController:Init(context)
 	if self._didInit then
@@ -229,6 +232,75 @@ end
 
 local function setHudVisible(visible: boolean)
 	setGuiVisible(HUD_SCREENGUI, visible)
+end
+
+local function hasActiveTouches(): boolean
+	if not UserInputService.TouchEnabled then
+		return false
+	end
+
+	local ok, touches = pcall(function()
+		return UserInputService:GetTouches()
+	end)
+
+	return ok and #touches > 0
+end
+
+local function restoreDrawPresentationAfterCloseInput(sourceInput: InputObject?)
+	closeRestoreToken += 1
+	local restoreToken = closeRestoreToken
+	local touchEndedConnection: RBXScriptConnection?
+	local didRestore = false
+	local isTouchClose = sourceInput ~= nil and sourceInput.UserInputType == Enum.UserInputType.Touch
+
+	local function restore()
+		if restoreToken ~= closeRestoreToken then
+			return
+		end
+		if didRestore then
+			return
+		end
+
+		didRestore = true
+
+		if touchEndedConnection ~= nil then
+			touchEndedConnection:Disconnect()
+			touchEndedConnection = nil
+		end
+
+		DrawPresentationState.Disable()
+		setHudVisible(true)
+		if worldHighlightPreviewManager ~= nil then
+			worldHighlightPreviewManager:Resume()
+		end
+	end
+
+	local function restoreAfterTouchSettle()
+		task.spawn(function()
+			RunService.RenderStepped:Wait()
+			restore()
+		end)
+	end
+
+	if isTouchClose then
+		restoreAfterTouchSettle()
+		return
+	end
+
+	if not hasActiveTouches() then
+		task.defer(restore)
+		return
+	end
+
+	touchEndedConnection = UserInputService.TouchEnded:Connect(function()
+		task.defer(function()
+			if not hasActiveTouches() then
+				restoreAfterTouchSettle()
+			end
+		end)
+	end)
+
+	task.delay(TOUCH_CLOSE_RESTORE_FALLBACK_SECONDS, restore)
 end
 
 local function shouldUseMobileSideMenuScale(): boolean
@@ -655,14 +727,10 @@ local function connectSpinTypeButtons()
 	updateSpinTypeButtonsVisual()
 end
 
-closeDrawUi = function()
+closeDrawUi = function(sourceInput: InputObject?)
 	clearHighlightPreview()
-	DrawPresentationState.Disable()
 	setScreenEnabled(false)
-	setHudVisible(true)
-	if worldHighlightPreviewManager ~= nil then
-		worldHighlightPreviewManager:Resume()
-	end
+	restoreDrawPresentationAfterCloseInput(sourceInput)
 end
 
 local function pauseWorldHighlightPreviews()
@@ -694,8 +762,8 @@ local function connectDrawClose()
 	if drawClose:IsA("GuiButton") then
 		table.insert(
 			connections,
-			drawClose.Activated:Connect(function()
-				closeDrawUi()
+			drawClose.Activated:Connect(function(input: InputObject?)
+				closeDrawUi(input)
 			end)
 		)
 
@@ -711,7 +779,7 @@ local function connectDrawClose()
 				input.UserInputType == Enum.UserInputType.MouseButton1
 				or input.UserInputType == Enum.UserInputType.Touch
 			then
-				closeDrawUi()
+				closeDrawUi(input)
 			end
 		end)
 	)
@@ -928,6 +996,7 @@ function DrawController:Open(forceOpen: boolean?)
 		return
 	end
 
+	closeRestoreToken += 1
 	pauseWorldHighlightPreviews()
 	setScreenEnabled(true)
 	setHudVisible(false)
