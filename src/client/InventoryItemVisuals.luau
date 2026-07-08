@@ -42,6 +42,15 @@ function InventoryItemVisuals.GetRarity(category: string, itemId: string): strin
 	return itemConfig.Rarity
 end
 
+function InventoryItemVisuals.GetDescription(category: string, itemId: string): string
+	local itemConfig = getItemConfig(category, itemId)
+	if itemConfig == nil or type(itemConfig.Description) ~= "string" or itemConfig.Description == "" then
+		return ""
+	end
+
+	return itemConfig.Description
+end
+
 function InventoryItemVisuals.GetIconAssetId(category: string, itemId: string): string?
 	local itemConfig = getItemConfig(category, itemId)
 	if itemConfig == nil or type(itemConfig.IconAssetId) ~= "string" or itemConfig.IconAssetId == "" then

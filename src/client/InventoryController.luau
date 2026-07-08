@@ -22,8 +22,10 @@ local InventoryAbilityText = require(Parabellum:WaitForChild("InventoryAbilityTe
 local InventoryConfig = require(Config:WaitForChild("InventoryConfig"))
 local InventoryItemVisuals = require(Parabellum:WaitForChild("InventoryItemVisuals"))
 local InventoryUpgradeConfirm = require(Parabellum:WaitForChild("InventoryUpgradeConfirm"))
+local JoinGroupRewardConfig = require(Config:WaitForChild("JoinGroupRewardConfig"))
 local MatchConfig = require(Config:WaitForChild("MatchConfig"))
 local Remotes = require(Network:WaitForChild("Remotes"))
+local WeaponSkinVFXConfig = require(Config:WaitForChild("WeaponSkinVFXConfig"))
 
 local requestEquipItemRemote = Remotes.GetClientToServer(Network, Remotes.ClientToServer.RequestEquipItem)
 local requestInventorySnapshotRemote =
@@ -33,8 +35,18 @@ local requestUpgradeAbilityRemote = Remotes.GetClientToServer(Network, Remotes.C
 local inventoryUpdatedRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.InventoryUpdated)
 local abilityUpgradeResultRemote = Remotes.GetServerToClient(Network, Remotes.ServerToClient.AbilityUpgradeResult)
 
+type JoinGroupRewardControllerApi = {
+	OpenFromInventory: ((self: any) -> ())?,
+	SetVisible: ((self: any, isVisible: boolean) -> ())?,
+}
+
+type ClientBootContext = {
+	Controllers: { [string]: any },
+}
+
 local InventoryController = {
 	Name = "InventoryController",
+	_context = nil :: ClientBootContext?,
 }
 
 local CATEGORY_ABILITY = "Ability"
@@ -77,6 +89,7 @@ local ACTION_BUTTON_DISABLED_TEXT_COLOR = Color3.fromRGB(150, 150, 150)
 local ACTION_BUTTON_DISABLED_IMAGE_COLOR = Color3.fromRGB(105, 105, 105)
 local ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0.105)
 local HIDDEN_ACTION_BUTTON_SIZE = UDim2.fromScale(0.925853252, 0)
+local VFX_DESCRIPTION_TEXT_COLOR = "#78D8FF"
 
 local ORIGINAL_TEXT_COLOR_ATTRIBUTE = "OriginalActionTextColor"
 local ORIGINAL_TEXT_TRANSPARENCY_ATTRIBUTE = "OriginalActionTextTransparency"
@@ -517,6 +530,97 @@ end
 
 local function getItemDisplayName(category: string, itemId: string): string
 	return InventoryItemVisuals.GetDisplayName(category, itemId)
+end
+
+local function isJoinGroupRewardItem(category: string, itemId: string): boolean
+	local reward = JoinGroupRewardConfig.Reward
+	return category == reward.Category and itemId == reward.ItemId
+end
+
+local function getJoinGroupRewardController(): JoinGroupRewardControllerApi?
+	local context = InventoryController._context
+	if context == nil then
+		return nil
+	end
+
+	local controller = context.Controllers.JoinGroupRewardController
+	if type(controller) ~= "table" then
+		return nil
+	end
+
+	return controller :: JoinGroupRewardControllerApi
+end
+
+local function getItemDescription(category: string, itemId: string): string
+	return InventoryItemVisuals.GetDescription(category, itemId)
+end
+
+local function escapeRichText(text: string): string
+	local escaped = string.gsub(text, "&", "&amp;")
+	escaped = string.gsub(escaped, "<", "&lt;")
+	escaped = string.gsub(escaped, ">", "&gt;")
+	return escaped
+end
+
+local function formatVFXDescriptionLine(text: string): string
+	return `<font color="{VFX_DESCRIPTION_TEXT_COLOR}">{escapeRichText(text)}</font>`
+end
+
+local function getWeaponSkinFireballVFXConfig(itemId: string): any?
+	local weaponSkinVFX = (WeaponSkinVFXConfig :: any).WeaponSkins
+	if type(weaponSkinVFX) ~= "table" then
+		return nil
+	end
+
+	local skinConfig = weaponSkinVFX[itemId]
+	if type(skinConfig) ~= "table" then
+		return nil
+	end
+
+	local fireballConfig = skinConfig.Fireball
+	return if type(fireballConfig) == "table" then fireballConfig else nil
+end
+
+local function weaponSkinReplacesFireballVFX(itemId: string): boolean
+	local fireballConfig = getWeaponSkinFireballVFXConfig(itemId)
+	if fireballConfig == nil then
+		return false
+	end
+
+	return fireballConfig.CastEffectPath ~= nil
+		or fireballConfig.ExplosionEffectPath ~= nil
+		or fireballConfig.HeavyExplosionEffectPath ~= nil
+		or fireballConfig.ProjectileEffectPathsByTier ~= nil
+end
+
+local function weaponSkinReplacesChargeVFX(itemId: string): boolean
+	local fireballConfig = getWeaponSkinFireballVFXConfig(itemId)
+	if fireballConfig == nil then
+		return false
+	end
+
+	return fireballConfig.ChargeEffectPath ~= nil or fireballConfig.ChargeStepEffectPath ~= nil
+end
+
+local function getWeaponSkinDescription(itemId: string): string
+	local description = getItemDescription(CATEGORY_WEAPON_SKIN, itemId)
+	if description == "" then
+		description = "Changes your weapon's in-match appearance."
+	end
+
+	local lines = {
+		escapeRichText(description),
+	}
+
+	if weaponSkinReplacesFireballVFX(itemId) then
+		table.insert(lines, formatVFXDescriptionLine("Replaces fireball visual effects."))
+	end
+
+	if weaponSkinReplacesChargeVFX(itemId) then
+		table.insert(lines, formatVFXDescriptionLine("Replaces charge visual effects."))
+	end
+
+	return table.concat(lines, "\n")
 end
 
 local function isDefaultOwnedItem(category: string, itemId: string): boolean
@@ -1243,6 +1347,12 @@ local function updateEquipButton()
 	local itemId = selectedItemId
 
 	if not selectedItemOwned then
+		if isJoinGroupRewardItem(category, itemId) then
+			setEquipButtonText("GROUP REWARD")
+			setEquipButtonEnabled(getJoinGroupRewardController() ~= nil)
+			return
+		end
+
 		setEquipButtonText("DRAW")
 		setEquipButtonEnabled(true)
 		return
@@ -1371,7 +1481,6 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 	selectedShopProductKey = nil
 
 	local displayName = getItemDisplayName(category, itemId)
-	local rarity = getItemRarity(category, itemId)
 
 	if itemName ~= nil then
 		itemName.Text = displayName
@@ -1379,10 +1488,15 @@ local function selectItem(category: string, itemId: string, owned: boolean)
 
 	if itemDescription ~= nil then
 		if category == CATEGORY_ABILITY then
+			itemDescription.RichText = false
 			local level = getAbilityLevelValue(itemId)
 			itemDescription.Text = InventoryAbilityText.GetEffectDescription(itemId, level)
+		elseif category == CATEGORY_WEAPON_SKIN then
+			itemDescription.RichText = true
+			itemDescription.Text = getWeaponSkinDescription(itemId)
 		else
-			itemDescription.Text = `Rarity: {rarity}`
+			itemDescription.RichText = false
+			itemDescription.Text = getItemDescription(category, itemId)
 		end
 	end
 
@@ -1413,6 +1527,7 @@ local function selectShopProduct(productKey: string)
 	end
 
 	if itemDescription ~= nil then
+		itemDescription.RichText = false
 		itemDescription.Text = if product.description == ""
 			then product.rewardText
 			else `{product.rewardText}\n{product.description}`
@@ -1443,6 +1558,7 @@ clearSelectedItem = function()
 	end
 
 	if itemDescription ~= nil then
+		itemDescription.RichText = false
 		itemDescription.Text = ""
 	end
 
@@ -1531,6 +1647,27 @@ local function equipSelectedItem()
 	end
 
 	if not selectedItemOwned then
+		if isJoinGroupRewardItem(selectedCategory, selectedItemId) then
+			local joinGroupRewardController = getJoinGroupRewardController()
+			if joinGroupRewardController == nil then
+				updateEquipButton()
+				return
+			end
+
+			setScreenVisible(false)
+			local openFromInventory = joinGroupRewardController.OpenFromInventory
+			if openFromInventory ~= nil then
+				openFromInventory(joinGroupRewardController)
+				return
+			end
+
+			local setVisible = joinGroupRewardController.SetVisible
+			if setVisible ~= nil then
+				setVisible(joinGroupRewardController, true)
+			end
+			return
+		end
+
 		openDrawForItem(selectedCategory, selectedItemId)
 		return
 	end
