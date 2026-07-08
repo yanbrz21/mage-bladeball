@@ -34,6 +34,8 @@ local mobileAbilityButton: GuiButton?
 local jumpButton: GuiButton?
 local pcAttackButton: GuiButton?
 local pcAbilityButton: GuiButton?
+local mobileFireballHintLabel: TextLabel?
+local pcFireballHintLabel: TextLabel?
 
 type ButtonVisualDefault = {
 	color: Color3?,
@@ -64,6 +66,8 @@ local RELEASE_SCALE = 1
 local PRESS_TWEEN = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local RELEASE_TWEEN = TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local READY_FLASH_COLOR = Color3.fromRGB(255, 210, 86)
+local FIREBALL_HINT_INITIAL_TEXT = "Hold the fireball button to charge."
+local FIREBALL_HINT_CHARGED_TEXT = "Fireballs can charge up to 3 power stages."
 
 local function getReferenceByTag(tag: string, timeout: number?): Instance?
 	local startedAt = os.clock()
@@ -296,6 +300,80 @@ local function getButtonMaxZIndex(button: GuiButton): number
 	return maxZIndex
 end
 
+local function getFireballHintText(): string?
+	local stage = localPlayer:GetAttribute("FireballHintStage")
+	if stage == "Initial" then
+		return FIREBALL_HINT_INITIAL_TEXT
+	elseif stage == "Charged" then
+		return FIREBALL_HINT_CHARGED_TEXT
+	end
+
+	return nil
+end
+
+local function createFireballHintLabel(button: GuiButton, isTouchLayout: boolean): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = "FireballHint"
+	label.Active = false
+	label.Selectable = false
+	label.Interactable = false
+	label.AnchorPoint = Vector2.new(0.5, 1)
+	label.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
+	label.BackgroundTransparency = 0.18
+	label.BorderSizePixel = 0
+	label.Font = Enum.Font.GothamBold
+	label.Text = ""
+	label.TextColor3 = Color3.fromRGB(255, 244, 212)
+	label.TextSize = if isTouchLayout then 15 else 18
+	label.TextWrapped = true
+	label.TextXAlignment = Enum.TextXAlignment.Center
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Visible = false
+	label.ZIndex = getButtonMaxZIndex(button) + 2
+	label.Size = if isTouchLayout then UDim2.fromOffset(230, 50) else UDim2.fromOffset(320, 58)
+	label.Position = if isTouchLayout then UDim2.new(0.5, -92, 0, -10) else UDim2.new(0.5, 0, 0, -8)
+	label.Parent = button
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = label
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 203, 92)
+	stroke.Transparency = 0.28
+	stroke.Thickness = 1
+	stroke.Parent = label
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, 10)
+	padding.PaddingRight = UDim.new(0, 10)
+	padding.PaddingTop = UDim.new(0, 6)
+	padding.PaddingBottom = UDim.new(0, 6)
+	padding.Parent = label
+
+	return label
+end
+
+local function getFireballHintLabel(button: GuiButton?, existingLabel: TextLabel?, isTouchLayout: boolean): TextLabel?
+	if button == nil then
+		if existingLabel ~= nil then
+			existingLabel:Destroy()
+		end
+		return nil
+	end
+
+	if existingLabel ~= nil and existingLabel.Parent == button then
+		existingLabel.ZIndex = getButtonMaxZIndex(button) + 2
+		return existingLabel
+	end
+
+	if existingLabel ~= nil then
+		existingLabel:Destroy()
+	end
+
+	return createFireballHintLabel(button, isTouchLayout)
+end
+
 local function getReadyFlash(button: GuiButton): Frame
 	local existing = readyFlashesByButton[button]
 	if existing ~= nil then
@@ -377,6 +455,26 @@ end
 
 local function isRoundRunning(): boolean
 	return getMatchState() == MatchConfig.MatchStates.RoundRunning
+end
+
+local function isLocalPlayerAliveInRound(): boolean
+	return localPlayer:GetAttribute("PlayerState") == MatchConfig.PlayerStates.AliveInRound
+end
+
+local function updateFireballHintLabel(label: TextLabel?, button: GuiButton?)
+	if label == nil then
+		return
+	end
+
+	local hintText = getFireballHintText()
+	local shouldShow = hintText ~= nil
+		and isRoundRunning()
+		and isLocalPlayerAliveInRound()
+		and button ~= nil
+		and button.Visible
+
+	label.Visible = shouldShow
+	label.Text = hintText or ""
 end
 
 local function getHudCooldown(abilityName: string): number
@@ -484,11 +582,7 @@ local function setButtonIcon(button: GuiButton?, iconAssetId: string?)
 	end
 
 	if defaultAbilityIconImagesByButton[button] == nil then
-		if iconImage:IsA("ImageLabel") then
-			defaultAbilityIconImagesByButton[button] = iconImage.Image
-		elseif iconImage:IsA("ImageButton") then
-			defaultAbilityIconImagesByButton[button] = iconImage.Image
-		end
+		defaultAbilityIconImagesByButton[button] = iconImage.Image
 	end
 
 	local resolvedIconAssetId = defaultAbilityIconImagesByButton[button]
@@ -496,11 +590,7 @@ local function setButtonIcon(button: GuiButton?, iconAssetId: string?)
 		resolvedIconAssetId = iconAssetId
 	end
 
-	if iconImage:IsA("ImageLabel") then
-		iconImage.Image = resolvedIconAssetId
-	elseif iconImage:IsA("ImageButton") then
-		iconImage.Image = resolvedIconAssetId
-	end
+	iconImage.Image = resolvedIconAssetId
 end
 
 local function getAbilityIconAssetId(abilityId: string?): string?
@@ -617,6 +707,9 @@ local function refreshLayout()
 		tweenButton(mobileAttackButton, RELEASE_SCALE)
 		tweenButton(pcAttackButton, RELEASE_SCALE)
 	end
+
+	updateFireballHintLabel(mobileFireballHintLabel, mobileAttackButton)
+	updateFireballHintLabel(pcFireballHintLabel, pcAttackButton)
 end
 
 local function updateButtonCooldownVisual(button: GuiButton?, abilityName: string)
@@ -1040,6 +1133,9 @@ function CombatControlHUDController:GetReferences()
 			warn("[CombatControlHUDController] PC_ABILITIES.ABILITY not found or not GuiButton")
 		end
 	end
+
+	mobileFireballHintLabel = getFireballHintLabel(mobileAttackButton, mobileFireballHintLabel, true)
+	pcFireballHintLabel = getFireballHintLabel(pcAttackButton, pcFireballHintLabel, false)
 end
 
 function CombatControlHUDController:BuildUI()
@@ -1117,6 +1213,8 @@ function CombatControlHUDController:Update()
 	updateButtonCooldownVisual(pcAbilityButton, AbilityConfig.ExtraSlotCooldownName)
 	updateButtonCooldownVisual(mobileAttackButton, "Fireball")
 	updateButtonCooldownVisual(pcAttackButton, "Fireball")
+	updateFireballHintLabel(mobileFireballHintLabel, mobileAttackButton)
+	updateFireballHintLabel(pcFireballHintLabel, pcAttackButton)
 end
 
 function CombatControlHUDController:Start()
