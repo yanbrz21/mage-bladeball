@@ -9,6 +9,7 @@ local DEFAULT_PREVIEW_DISTANCE = 6
 local DEFAULT_EMIT_COUNT = 12
 local DIM_PLANE_EXTRA_DISTANCE = 2.4
 local DIM_PLANE_TRANSPARENCY = 0.2
+local DIM_PLANE_WIDTH_MULTIPLIER = 2
 local DEFAULT_WORLD_SCALE = 1
 
 export type LayoutOptions = {
@@ -377,7 +378,7 @@ function DrawHighlightPreviewRuntime.new(options: RuntimeOptions): Runtime
 		local viewportSize = camera.ViewportSize
 		local aspect = if viewportSize.Y > 0 then viewportSize.X / viewportSize.Y else 1
 		local height = 2 * math.tan(math.rad(camera.FieldOfView) * 0.5) * distance
-		local width = height * aspect
+		local width = height * aspect * DIM_PLANE_WIDTH_MULTIPLIER
 
 		plane.Size = Vector3.new(width, height, 0.05)
 		plane.CFrame = camera.CFrame * CFrame.new(0, 0, -distance)
