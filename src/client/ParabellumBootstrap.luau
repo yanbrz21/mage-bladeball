@@ -10,6 +10,7 @@ local CONTROLLER_NAMES = table.freeze({
 	"DrawController",
 	"InventoryController",
 	"QuestController",
+	"DailyQuestTutorialBeamController",
 	"CombatControlHUDController",
 })
 
