@@ -6,13 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 local parabellumFolder = ReplicatedStorage:WaitForChild("Parabellum")
 
-local CONTROLLER_NAMES = table.freeze({
-	"DrawController",
-	"InventoryController",
-	"QuestController",
-	"DailyQuestTutorialBeamController",
-	"CombatControlHUDController",
-})
+local CONTROLLER_NAMES = table.freeze({})
 
 type Controller = {
 	Name: string?,
